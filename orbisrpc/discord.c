@@ -122,7 +122,7 @@ static int send_identify(discord_t *d, const char *token){
     jl_obj_set(pr,"status",jl_new_string("online"));
     jl_obj_set(pr,"activities",jl_new_array());
     jl_obj_set(pr,"afk",jl_new_bool(0));
-    jl_obj_set(pr,"since",jl_new_number(0));
+    jl_obj_set(pr,"since",jl_new_null());
     jl_obj_set(dd,"presence",pr);
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
@@ -231,6 +231,7 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_obj_set(act,"name",jl_new_string(name?name:""));
     jl_obj_set(act,"type",jl_new_number(0)); /* Playing */
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
+    if(title_id&&title_id[0]) jl_obj_set(act,"details",jl_new_string(title_id));
     if(started_epoch>0){
         jl_val_t *ts=jl_new_object();
         if(!ts){ jl_free(act); return -1; }
@@ -288,7 +289,9 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_obj_set(dd,"activities",jl_new_array());
     jl_arr_push(jl_obj_get(dd,"activities"), act);
     jl_obj_set(dd,"status",jl_new_string("online"));
-    jl_obj_set(dd,"since",jl_new_number(0));
+    /* NOT idle: Gateway expects null, not 0. Sending 0 asserts
+     * "idle since 1970" and can wedge the client timer at 0:00. */
+    jl_obj_set(dd,"since",jl_new_null());
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
     if(!root){ jl_free(dd); return -1; }
@@ -305,7 +308,7 @@ int discord_clear_presence(discord_t *d){
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());
     jl_obj_set(dd,"status",jl_new_string("online")); /* stay visible, just idle */
-    jl_obj_set(dd,"since",jl_new_number(0));
+    jl_obj_set(dd,"since",jl_new_null());
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
     if(!root){ jl_free(dd); return -1; }

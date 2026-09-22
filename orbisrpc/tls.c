@@ -16,12 +16,25 @@
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
+#include <mbedtls/debug.h>
 #include <orbis/Net.h>
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+
+/* mbedTLS internal trace -> our log: turns "handshake fail" from a bare
+ * code into the exact failing step. */
+static void tls_mbedtls_dbg(void *ctx, int level,
+                             const char *file, int line, const char *str){
+    (void)ctx; (void)level;
+    const char *base = strrchr(file, '/');
+    base = base ? base + 1 : file;
+    size_t n = strlen(str);
+    while(n > 0 && (str[n-1] == '\n' || str[n-1] == '\r')) n--;
+    log_msg("mbedTLS %s:%d: %.*s", base, line, (int)n, str);
+}
 
 struct tls_ctx {
     mbedtls_ssl_context ssl;
@@ -97,6 +110,15 @@ tls_ctx_t *tls_start(int fd, const char *host){
     /* No trust store on console: parse the chain, skip validation. */
     mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
     mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->rng);
+    /* TLS 1.2 ceiling (ported from 1.0, proven on hardware): mbedTLS 3.x
+     * routes TLS 1.3 through the PSA crypto subsystem, whose init fails
+     * on-console (PSA_ERROR_INSUFFICIENT_ENTROPY) and kills every
+     * handshake instantly. TLS 1.2 needs no PSA state. */
+    mbedtls_ssl_conf_max_tls_version(&t->conf, MBEDTLS_SSL_VERSION_TLS1_2);
+#ifdef MBEDTLS_DEBUG_C
+    mbedtls_debug_set_threshold(3);
+    mbedtls_ssl_conf_dbg(&t->conf, tls_mbedtls_dbg, NULL);
+#endif
     {
         static const char *protos[] = { "http/1.1", NULL };
         mbedtls_ssl_conf_alpn_protocols(&t->conf, protos);
@@ -121,7 +143,7 @@ tls_ctx_t *tls_start(int fd, const char *host){
             if(rc == 0) break;
             if(rc != MBEDTLS_ERR_SSL_WANT_READ &&
                rc != MBEDTLS_ERR_SSL_WANT_WRITE){
-                log_msg("tls: handshake fail %d", rc);
+                log_msg("tls: handshake fail %d (mbedTLS 0x%08x)", rc, (unsigned)rc);
                 goto fail;
             }
             if(time(NULL) > dl){ log_msg("tls: handshake timeout"); goto fail; }

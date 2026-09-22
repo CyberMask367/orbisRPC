@@ -24,6 +24,7 @@ char *jl_stringify(const jl_val_t *v);
 jl_val_t *jl_new_string(const char *s);
 jl_val_t *jl_new_number(double n);
 jl_val_t *jl_new_bool(int b);
+jl_val_t *jl_new_null(void);
 jl_val_t *jl_new_object(void);
 jl_val_t *jl_new_array(void);
 void jl_obj_set(jl_val_t *obj, const char *key, jl_val_t *val);
