@@ -13,6 +13,7 @@ typedef struct {
                                 * large_image becomes <base><lower titleId>.png */
     int enabled;
     int auto_update;       /* check GitHub releases once per boot, stage newer */
+    int debug;             /* verbose debug logging (per-poll detail, no secrets) */
     int poll_interval_s;   /* game-check cadence */
     char presence_state[128];  /* activity "state" line, e.g. "On PS4" */
 } cfg_t;

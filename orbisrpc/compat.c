@@ -5,6 +5,8 @@
 #include <fcntl.h>
 #include <unistd.h>
 #include <time.h>
+#include <stdint.h>
+#include "clock.h"
 
 int *__errno_location(void) __attribute__((weak));
 int *__errno_location(void){
@@ -69,4 +71,22 @@ int mbedtls_platform_entropy_poll(void *data, unsigned char *out,
     if(getentropy(out, len) != 0) return -1;
     *olen = len;
     return 0;
+}
+
+int64_t orbis_mono_s(void){
+#if defined(__PS4__) || (defined(__FreeBSD__) && !defined(__APPLE__))
+    /* PS4 builds (--target=x86_64-pc-freebsd12-elf, -D__PS4__). Declared
+     * here instead of including orbis headers so host builds stay clean. */
+    extern unsigned long long sceKernelGetProcessTime(void);
+    return (int64_t)(sceKernelGetProcessTime() / 1000000ull);
+#else
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC)
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#else
+    ts.tv_sec = time(NULL);
+    ts.tv_nsec = 0;
+#endif
+    return (int64_t)ts.tv_sec;
+#endif
 }

@@ -15,6 +15,8 @@
 static FILE *g_log = NULL;
 static int g_klog = -1;
 static volatile int g_log_lock = 0;
+static volatile int g_debug = 0;
+void log_set_debug(int on){ g_debug = on ? 1 : 0; }
 static void log_lock(void){ while(__sync_lock_test_and_set(&g_log_lock, 1)) usleep(1000); }
 static void log_unlock(void){ __sync_lock_release(&g_log_lock); }
 
@@ -91,4 +93,25 @@ void log_close(void) {
     if (g_log && g_log != stderr) fclose(g_log);
     g_log = NULL;
     if (g_klog >= 0) { close(g_klog); g_klog = -1; }
+}
+
+void log_dbg(const char *fmt, ...) {
+    if (!g_debug || !fmt) return;
+    log_lock();
+    if (!g_log) { g_log = stderr; }
+    va_list ap;
+    va_start(ap, fmt);
+    time_t t = time(NULL);
+    struct tm tmv; struct tm *tm = NULL;
+    extern struct tm *gmtime_r(const time_t *, struct tm *);
+    tm = gmtime_r(&t, &tmv);
+    char ts[20];
+    if(tm) strftime(ts, sizeof(ts), "%Y-%m-%d %H:%M:%S", tm);
+    else { strncpy(ts, "1970-01-01 00:00:00", sizeof ts); ts[sizeof ts-1]=0; }
+    fprintf(g_log, "[%s] DBG ", ts);
+    vfprintf(g_log, fmt, ap);
+    fprintf(g_log, "\n");
+    fflush(g_log);
+    va_end(ap);
+    log_unlock();
 }

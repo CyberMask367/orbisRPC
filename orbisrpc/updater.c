@@ -10,6 +10,7 @@
  * injection. Never deletes, never writes unvalidated bytes.
  */
 #include "updater.h"
+#include "clock.h"
 #include "version.h"
 #include "jsonlite.h"
 #include "log.h"
@@ -95,13 +96,13 @@ static char *https_get(const char *host, const char *path,
     size_t bl = 0, hl = 0;
     static char hb[2048];
     int hdr_done = 0, status = 0;
-    int64_t dl = time(NULL) + UPD_DEADLINE_S + 20;
+    int64_t dl = orbis_mono_s() + UPD_DEADLINE_S + 20;
     for(;;){
         char tmp[2048];
         int r = tls_read(t, tmp, sizeof tmp);
         if(r < 0) break;
         if(r == 0){
-            if(time(NULL) > dl) break;
+            if(orbis_mono_s() > dl) break;
             usleep(20000);
             continue;
         }
@@ -121,7 +122,7 @@ static char *https_get(const char *host, const char *path,
             } else continue;
         }
         while(off < (size_t)r && bl < cap - 1) body[bl++] = tmp[off++];
-        if(bl >= cap - 1 || time(NULL) > dl) break;
+        if(bl >= cap - 1 || orbis_mono_s() > dl) break;
     }
     tls_free(t);
     body[bl] = 0;

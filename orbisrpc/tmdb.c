@@ -2,6 +2,7 @@
  * Transport mirrors ws.c patterns (resolver pool, SNDTIMEO connect cap,
  * recv deadline). One attempt, no retries: failure falls through. */
 #include "tmdb.h"
+#include "clock.h"
 #include "tmdb_crypto.h"
 #include "log.h"
 #include <orbis/Net.h>
@@ -78,11 +79,11 @@ static int http_get(const char *host, const char *path,
         path, host);
     if(rl <= 0 || rl >= (int)sizeof req){ sceNetSocketClose(fd); return -1; }
     int sent = 0;
-    int64_t dl = time(NULL) + TMDB_DEADLINE_S;
+    int64_t dl = orbis_mono_s() + TMDB_DEADLINE_S;
     while(sent < rl){
         int r = sceNetSend(fd, req+sent, rl-sent, 0);
         if(r > 0){ sent += r; continue; }
-        if(time(NULL) > dl || r == 0){ sceNetSocketClose(fd); return -1; }
+        if(orbis_mono_s() > dl || r == 0){ sceNetSocketClose(fd); return -1; }
     }
     /* read headers then body; cap total */
     char hb[2048];
@@ -113,7 +114,7 @@ static int http_get(const char *host, const char *path,
             body[bl++] = tmp[off++];
         }
         if(bl >= cap - 1) break;
-        if(time(NULL) > dl) break;
+        if(orbis_mono_s() > dl) break;
     }
     sceNetSocketClose(fd);
     body[bl] = 0;

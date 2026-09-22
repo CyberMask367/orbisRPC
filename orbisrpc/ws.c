@@ -5,6 +5,7 @@
  * All client->server frames are masked per RFC 6455 5.3, control frames too.
  */
 #include "ws.h"
+#include "clock.h"
 #include "tls.h"
 #include "log.h"
 #include <orbis/Net.h>
@@ -49,7 +50,7 @@ static int ws_send_all(ws_t *w, const unsigned char *data, size_t n){
 
 static void next_mask(unsigned char mk[4]){
     static uint32_t mk_seed;
-    if(!mk_seed) mk_seed = (uint32_t)time(NULL) ^ 0x9e3779b9u ^ (uint32_t)(uintptr_t)&mk_seed;
+    if(!mk_seed) mk_seed = (uint32_t)orbis_mono_s() ^ 0x9e3779b9u ^ (uint32_t)(uintptr_t)&mk_seed;
     mk_seed = mk_seed*1664525u + 1013904223u;
     mk[0]=(unsigned char)(mk_seed&0xff);       mk[1]=(unsigned char)((mk_seed>>8)&0xff);
     mk[2]=(unsigned char)((mk_seed>>16)&0xff); mk[3]=(unsigned char)((mk_seed>>24)&0xff);
@@ -141,7 +142,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     log_msg("hs request sent (%dB)", n);
     /* Read response headers; bytes past "\r\n\r\n" are the first websocket
      * frame (usually HELLO arriving early) and MUST be kept, not dropped. */
-    char hdr[2048]; int hlen=0, rd; int64_t t0=time(NULL);
+    char hdr[2048]; int hlen=0, rd; int64_t t0=orbis_mono_s();
     int header_end = -1;
     extern int daemon_stop_requested(void) __attribute__((weak));
     while(hlen<(int)sizeof hdr-1){
@@ -159,7 +160,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
             continue;
         }
         if(rd==0){
-            if(time(NULL)-t0 > 10){ log_msg("hs timeout (got %dB)", hlen); goto fail; }
+            if(orbis_mono_s()-t0 > 10){ log_msg("hs timeout (got %dB)", hlen); goto fail; }
             usleep(20000); continue;
         }
         goto fail;

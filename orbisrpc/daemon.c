@@ -14,6 +14,7 @@
  * recover, but suspend behavior is UNVERIFIED on hardware.
  */
 #include "cfg.h"
+#include "clock.h"
 #include "log.h"
 #include "ws.h"
 #include "discord.h"
@@ -85,6 +86,8 @@ int daemon_run(const char *fixed_game_name){
         log_msg("config load failed; running on defaults until valid config appears");
     }
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); log_close(); return 0; }
+    log_set_debug(g_cfg.debug);
+    if(g_cfg.debug) log_dbg("debug logging on (config)");
     if(!have_token(&g_cfg)){
         log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
         log_close();
@@ -111,7 +114,12 @@ int daemon_run(const char *fixed_game_name){
          * On parse failure keep last-good config instead of stale defaults. */
         {
             cfg_t next = g_cfg;
-            if(cfg_load(CFG_PATH, &next) == 0) g_cfg = next;
+            if(cfg_load(CFG_PATH, &next) == 0){
+                if(next.debug != g_cfg.debug)
+                    log_msg("debug logging %s", next.debug ? "on" : "off");
+                g_cfg = next;
+                log_set_debug(g_cfg.debug);
+            }
             else log_msg("config reload failed; keeping last-good config");
         }
         if(!have_token(&g_cfg)){
@@ -140,12 +148,17 @@ int daemon_run(const char *fixed_game_name){
          * A reconnect re-posts presence only when needed, timer intact. */
         static int active = 0;
         static char last[128] = "";
+        static char sess_tid[16] = "";
         static int64_t started = 0;
+        /* Transition debounce: shell flickers during launches, so a new
+         * title (or disappearance) needs consecutive polls (2 at ~1s). */
+        static char cand_title[16] = "";
+        static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
-            int64_t now = time(NULL);
+            int64_t now = orbis_mono_s();
             if(now != last_poll){
                 last_poll = now;
                 char name[128] = "";
@@ -160,24 +173,46 @@ int daemon_run(const char *fixed_game_name){
                 }
 
                 if(name[0]){
-                    if(!active || strncmp(name,last,sizeof last)!=0){
+                    const char *cur_tid = detect_last_titleid();
+                    if(!cur_tid) cur_tid = "";
+                    if(!strncmp(cur_tid, cand_title, sizeof cand_title)){
+                        cand_hits++;
+                    } else {
+                        strncpy(cand_title, cur_tid, sizeof cand_title-1);
+                        cand_title[sizeof cand_title-1] = 0;
+                        cand_hits = 1;
+                    }
+                    miss_hits = 0;
+                    if(fixed_game_name || cand_hits >= 2){
+                    if(!active || strncmp(cur_tid,sess_tid,sizeof sess_tid)!=0){
+                        active = 1;
+                        strncpy(sess_tid, cur_tid, sizeof sess_tid-1);
+                        strncpy(last, name, sizeof last-1);
+                        last[sizeof last-1] = 0;
                         started = time(NULL);
+                        need_post = 1;
+                        log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
+                    } else if(strncmp(name,last,sizeof last)!=0){
+                        strncpy(last, name, sizeof last-1);
+                        last[sizeof last-1] = 0;
                         need_post = 1;
                     }
                     if(need_post){
                         const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
-                        const char *tid = detect_last_titleid();
                         const char *tart = detect_last_art();
-                        discord_set_presence_ex(&dc, state, name, tid, g_cfg.application_id, g_cfg.art_base_url, tart, started);
-                        log_msg("presence: %s", name);
-                        strncpy(last, name, sizeof last-1);
-                        last[sizeof last-1] = 0;
+                        discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, started);
+                        log_msg("presence: %s", last);
                         active = 1; need_post = 0;
                     }
+                    }
                 }else if(active){
-                    discord_clear_presence(&dc);
-                    log_msg("presence cleared");
-                    last[0]=0; active=0; started=0;
+                    cand_title[0] = 0;
+                    cand_hits = 0;
+                    if(++miss_hits >= 2){
+                        discord_clear_presence(&dc);
+                        log_msg("presence cleared");
+                        last[0]=0; sess_tid[0]=0; active=0; started=0;
+                    }
                 }
             }
 

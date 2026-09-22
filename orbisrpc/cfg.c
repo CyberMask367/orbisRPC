@@ -63,6 +63,7 @@ int cfg_load(const char *path, cfg_t *c) {
 #undef STR
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
     o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   c->auto_update = (int)o->num;
+    o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   c->debug = (int)o->num;
     o = jl_obj_get(root, "poll_interval_s"); if (o && o->type == JL_NUMBER) c->poll_interval_s = (int)o->num;
     jl_free(root);
     clamp_cfg(c);
@@ -78,6 +79,7 @@ void cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
     jl_obj_set(r, "enabled",         jl_new_bool(c->enabled));
     jl_obj_set(r, "auto_update",     jl_new_bool(c->auto_update));
+    jl_obj_set(r, "debug",           jl_new_bool(c->debug));
     jl_obj_set(r, "poll_interval_s", jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
     char *s = jl_stringify(r);

@@ -93,8 +93,32 @@ static int is_title_prefix(const char *n){
  * detect_current_game / detect_name_for_title. */
 static char s_last_titleid[16] = "";
 static char s_last_art[256] = "";
+static char s_res_titleid[16] = "";
+static char s_res_name[128] = "";
+static char s_res_art[256] = "";
+static int s_res_valid = 0;
 const char *detect_last_titleid(void){ return s_last_titleid[0] ? s_last_titleid : NULL; }
 const char *detect_last_art(void){ return s_last_art[0] ? s_last_art : NULL; }
+static void remember_resolved(const char *ti, const char *name, const char *art){
+    if(!ti || !name) return;
+    strncpy(s_res_titleid, ti, sizeof s_res_titleid - 1);
+    s_res_titleid[sizeof s_res_titleid - 1] = 0;
+    strncpy(s_res_name, name, sizeof s_res_name - 1);
+    s_res_name[sizeof s_res_name - 1] = 0;
+    if(art){
+        strncpy(s_res_art, art, sizeof s_res_art - 1);
+        s_res_art[sizeof s_res_art - 1] = 0;
+    } else s_res_art[0] = 0;
+    s_res_valid = 1;
+}
+static int cached_resolve(const char *ti, char *out_name, size_t cap){
+    if(!s_res_valid || !ti || !ti[0] || strcmp(ti, s_res_titleid) != 0) return 0;
+    strncpy(out_name, s_res_name, cap - 1);
+    out_name[cap - 1] = 0;
+    strncpy(s_last_art, s_res_art, sizeof s_last_art - 1);
+    s_last_art[sizeof s_last_art - 1] = 0;
+    return 1;
+}
 static void remember_titleid(const char *ti){
     if(!ti) return;
     strncpy(s_last_titleid, ti, sizeof s_last_titleid - 1);
@@ -213,9 +237,13 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(scan_recent_titleid(titleId,sizeof titleId)==0){
         remember_titleid(titleId);
         s_last_art[0] = 0;
+        if(cached_resolve(titleId, out_name, cap)){
+            log_msg("name: %s via cache", out_name);
+            named = 1;
+        }
         /* cheap, game-process-safe sources first; Sony TMDB (network)
          * resolves anything local sources miss, on any console. */
-        if(pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
+        if(!named && pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
         if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
         if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
         if(!named){ if(nametable_lookup(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via table", out_name); } }
@@ -227,7 +255,10 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
             } else s_last_art[0] = 0;
         }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
+        remember_resolved(titleId, out_name, s_last_art);
     }else{
+        remember_titleid("");
+        s_last_art[0] = 0;
         strncpy(out_name, "(unknown game)", cap-1); out_name[cap-1]=0;
     }
     if(out_path){ snprintf(out_path, p_cap, "/data/orbisRPC/.lastgame/%s", titleId[0]?titleId:"unknown"); }
@@ -241,21 +272,27 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
     remember_titleid(titleId);
     s_last_art[0] = 0;
+    if(cached_resolve(titleId, out_name, cap)){
+        log_msg("name: %s via cache", out_name);
+        return 0;
+    }
     /* Game-process-safe only: small reads plus one bounded network
      * lookup; no multi-megabyte scans anywhere in this codebase. */
-    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); return 0; }
+    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); remember_resolved(titleId, out_name, ""); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
-    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); return 0; }
-    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); return 0; }
-    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); return 0; }
+    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); remember_resolved(titleId, out_name, ""); return 0; }
+    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); remember_resolved(titleId, out_name, ""); return 0; }
+    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); remember_resolved(titleId, out_name, ""); return 0; }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
             strncpy(s_last_art, art, sizeof s_last_art-1);
+            remember_resolved(titleId, out_name, art);
             return 0; /* tmdb_resolve already logged */
         }
         s_last_art[0] = 0;
     }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
+    remember_resolved(titleId, out_name, "");
     return 0;
 }

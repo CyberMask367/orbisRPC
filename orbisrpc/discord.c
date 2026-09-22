@@ -9,6 +9,7 @@
  * (close 4004) is reported as fatal instead of looping forever.
  */
 #include "discord.h"
+#include "clock.h"
 #include "b64.h"
 #include "log.h"
 #include "jsonlite.h"
@@ -99,7 +100,7 @@ static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int6
         int nr=ws_recv_frame(&d->ws,buf,cap,op,fin);
         if(nr==-3){ log_msg("skipped oversized gateway frame"); continue; }
         if(nr!=0) return nr;
-        if(time(NULL)>deadline) return -4;
+        if(orbis_mono_s()>deadline) return -4;
         usleep(50000);
     }
 }
@@ -141,7 +142,7 @@ int discord_connect(discord_t *d, const char *token){
     int rc=ws_connect(&d->ws, GW_HOST, GW_PORT, GW_PATH, key);
     if(rc){ log_msg("ws connect fail %d",rc); return -1; }
     d->connected=1;
-    int64_t now=time(NULL);
+    int64_t now=orbis_mono_s();
     d->last_heartbeat=now; d->last_ack=now;
     /* HELLO (text frame carrying {"op":10,...}) */
     char buf[2048]; int op=0,fin=0;
@@ -175,7 +176,7 @@ int discord_connect(discord_t *d, const char *token){
     log_msg("discord: identify sent, hb=%llds",(long long)(d->hb_interval_ms/1000));
     /* READY confirms the token was accepted. `op` is the WebSocket frame
      * type; the gateway event is JSON inside — parse it, don't switch on it. */
-    int64_t dl=time(NULL)+20;
+    int64_t dl=orbis_mono_s()+20;
     for(;;){
         nr=rx_frame(d,buf,sizeof buf,&op,&fin,dl);
         if(nr==-4){ log_msg("no READY after identify (timeout)"); break; }
@@ -191,7 +192,7 @@ int discord_connect(discord_t *d, const char *token){
         if(op==9){ ws_pong(&d->ws); continue; }
         if(op!=1) continue;
         int go = gw_op(buf, (size_t)nr);
-        if(go==11){ d->last_ack=time(NULL); continue; }
+        if(go==11){ d->last_ack=orbis_mono_s(); continue; }
         if(go==0 && is_ready(buf, (size_t)nr)){
             gw_seq(d, buf, (size_t)nr);
             log_msg("discord: gateway ready");
@@ -322,7 +323,7 @@ int discord_clear_presence(discord_t *d){
 
 int discord_tick(discord_t *d){
     if(!d || !d->connected) return -1;
-    int64_t now=time(NULL);
+    int64_t now=orbis_mono_s();
     long hb_s=(long)(d->hb_interval_ms/1000); if(hb_s<5)hb_s=5;
     /* gateway must ack heartbeats; 2 missed intervals means it's gone */
     if(d->sent_hb && now-d->last_ack > hb_s*2+15){

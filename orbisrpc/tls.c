@@ -13,6 +13,7 @@
  */
 #include "tls.h"
 #include "log.h"
+#include "clock.h"
 #include <mbedtls/ssl.h>
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
@@ -135,7 +136,7 @@ tls_ctx_t *tls_start(int fd, const char *host){
 
     log_msg("tls: handshake start");
     {
-        int64_t dl = time(NULL) + 15;
+        int64_t dl = orbis_mono_s() + 15;
         extern int daemon_stop_requested(void) __attribute__((weak));
         for(;;){
             if(daemon_stop_requested && daemon_stop_requested()){ log_msg("tls: aborted (stop)"); goto fail; }
@@ -146,7 +147,7 @@ tls_ctx_t *tls_start(int fd, const char *host){
                 log_msg("tls: handshake fail %d (mbedTLS 0x%08x)", rc, (unsigned)rc);
                 goto fail;
             }
-            if(time(NULL) > dl){ log_msg("tls: handshake timeout"); goto fail; }
+            if(orbis_mono_s() > dl){ log_msg("tls: handshake timeout"); goto fail; }
             usleep(20000);
         }
     }
@@ -176,7 +177,7 @@ int tls_write(tls_ctx_t *t, const void *buf, size_t len){
     if(!t || (!buf && len)) return -1;
     const unsigned char *p = (const unsigned char *)buf;
     size_t done = 0;
-    int64_t dl = time(NULL) + 10;
+    int64_t dl = orbis_mono_s() + 10;
     while(done < len){
         int r = mbedtls_ssl_write(&t->ssl, p + done, len - done);
         if(r > 0){ done += (size_t)r; continue; }
@@ -184,7 +185,7 @@ int tls_write(tls_ctx_t *t, const void *buf, size_t len){
             log_msg("tls: write fail %d", r);
             return -1;
         }
-        if(time(NULL) > dl){ log_msg("tls: write timeout"); return -1; }
+        if(orbis_mono_s() > dl){ log_msg("tls: write timeout"); return -1; }
         usleep(10000);
     }
     return (int)done;
