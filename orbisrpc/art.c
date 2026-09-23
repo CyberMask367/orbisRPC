@@ -175,7 +175,7 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
         return 0;
     }
     if(!art_parse_mp(resp, rlen, url, out_mp, cap)){
-        log_msg("art: no mp path for url");
+        log_msg("art: no mp path for url (resp %zuB: %.120s)", rlen, resp);
         return 0;
     }
     strncpy(s_last_url, url, sizeof s_last_url - 1);
