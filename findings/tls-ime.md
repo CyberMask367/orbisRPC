@@ -1,6 +1,23 @@
-# TLS + IME console findings
+# TLS + IME + presence-display findings (hardware-verified)
 
-## TLS: mbedTLS 3.x PSA failure (FIXED, verified on hardware)
+## Presence display rules (verified 2026-09-23 via live holds + human eyes)
+
+- Game activity with **external-URL art or dangling asset key**: Discord
+  drops the ENTIRE activity (name, timer, everything). No error anywhere.
+- Game activity with **live app id, no art**: renders fully
+  (name/details/state/timer).
+- Game activity with **live app id + uploaded asset key**: renders; tile
+  shows "?" until the asset propagates/caches clear (can take a restart).
+- Bare name activity: renders.
+- Custom status (type 4): renders.
+- `since: null` + integer-ms `start` required (0 wedges timer at 0:00).
+- Asset uploads ARE possible via API: stage file through
+  `POST /channels/{id}/attachments`, PUT bytes to `upload_url`, then
+  `POST /applications/{app}/assets` with `key` + `upload_filename`.
+  New assets report `"visibility": "private"`; display still pending
+  verification after propagation.
+- Lanyard is BLIND to user-token gateway activities (shows [] even for
+  live-rendered ones). Human eyes only. Do not verify with it.
 
 Symptom: every handshake died instantly with return `-1` (not a real
 mbedTLS code), after DNS + TCP succeeded.
