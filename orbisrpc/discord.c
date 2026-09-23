@@ -248,34 +248,12 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
         if(!art_warned){ art_warned = 1;
             log_msg("art: no application_id or art_base_url; presence sends without artwork"); }
     }
-    if(title_id&&title_id[0]&&(art_url&&art_url[0])){
-        /* official art URL (TMDB/Sony CDN): most direct, no uploads. */
-        jl_val_t *as=jl_new_object();
-        if(as){
-            jl_obj_set(as,"large_image",jl_new_string(art_url));
-            jl_obj_set(as,"large_text",jl_new_string(name?name:""));
-            jl_obj_set(act,"assets",as);
-        }
-    }
-    else if(title_id&&title_id[0]&&(art_base_url&&art_base_url[0])){
-        /* external-URL artwork: <base><lower titleId>.png, e.g. a repo-hosted
-         * icon pack. No uploads, no app needed for the image itself. */
-        char key[16];
-        if(asset_key(title_id, key, sizeof key) >= 4){
-            char url[288];
-            int n=snprintf(url,sizeof url,"%s%s.png",art_base_url,key);
-            if(n>0 && (size_t)n<sizeof url){
-                jl_val_t *as=jl_new_object();
-                if(as){
-                    jl_obj_set(as,"large_image",jl_new_string(url));
-                    jl_obj_set(as,"large_text",jl_new_string(name?name:""));
-                    jl_obj_set(act,"assets",as);
-                }
-            }
-        }
-    }
-    else if(title_id&&title_id[0]&&application_id&&application_id[0]){
-        /* asset key: lowercase titleId, exactly how the icon is uploaded */
+    /* Artwork: asset KEYS into our own application only (verified on
+     * hardware 2026-09-23). External-URL large_image makes Discord drop
+     * the ENTIRE activity, so URLs are never sent — upload each title's
+     * icon in the developer portal (key = lowercase title id) instead. */
+    (void)art_url; (void)art_base_url;
+    if(title_id&&title_id[0]&&application_id&&application_id[0]){
         char key[16];
         if(asset_key(title_id, key, sizeof key) >= 4){
             jl_val_t *as=jl_new_object();
