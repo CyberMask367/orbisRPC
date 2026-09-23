@@ -4,6 +4,7 @@
 #include "art.h"
 #include "jsonlite.h"
 #include "log.h"
+#include "updater_http.h"
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -120,7 +121,6 @@ static int art_post(const char *app_id, const char *token, const char *url,
     if(tls_write(t, payload, (size_t)pl) < 0){ tls_free(t); return -1; }
     size_t bl = 0;
     int64_t dl = orbis_mono_s() + ART_DEADLINE_S + 10;
-    int status = 0;
     for(;;){
         char tmp[1024];
         int r = tls_read(t, tmp, sizeof tmp - 1);
@@ -130,25 +130,27 @@ static int art_post(const char *app_id, const char *token, const char *url,
             usleep(20000);
             continue;
         }
-        if(bl == 0 && bl + (size_t)r < body_cap){
-            /* first chunk: parse status line */
-            tmp[r] = 0;
-            if(!strncmp(tmp, "HTTP/1.", 7)) status = atoi(tmp + 9);
-        }
         if(bl + (size_t)r >= body_cap) break;
         memcpy(out_body + bl, tmp, (size_t)r);
         bl += (size_t)r;
         if(orbis_mono_s() > dl) break;
     }
     tls_free(t);
-    if(bl == 0 || status != 200) return -1;
+    if(bl == 0){ return -1; }
     out_body[bl] = 0;
-    /* strip headers */
-    char *e = strstr(out_body, "\r\n\r\n");
-    if(!e) return -1;
-    size_t hlen = (size_t)(e - out_body) + 4;
-    if(out_len) *out_len = bl - hlen;
-    memmove(out_body, e + 4, bl - hlen + 1);
+    /* Parse with the shared chunked-aware HTTP parser (Discord serves
+     * Transfer-Encoding: chunked here; naive header-splitting reads the
+     * chunk framing as body and the mp: lookup silently misses). */
+    {
+        int st = 0;
+        size_t olen = 0;
+        char *body = upd_parse_response(out_body, bl, body_cap,
+                                        &st, &olen, NULL, 0);
+        if(!body || st != 200){ free(body); return -1; }
+        if(out_len) *out_len = olen;
+        memmove(out_body, body, olen + 1);
+        free(body);
+    }
     return 0;
 #else
     /* Host test build: no transport; parse path still testable. */

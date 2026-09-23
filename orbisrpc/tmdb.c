@@ -6,6 +6,8 @@
 #include "tmdb_crypto.h"
 #include "log.h"
 #include "art_table.h"
+#include "tls.h"
+#include "updater_http.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -31,6 +33,7 @@
 #define TMDB_PORT 80
 #define TMDB_BODY_MAX 65536
 #define TMDB_DEADLINE_S 10
+#define TMDB_HTTPS_DEADLINE_S 12
 
 static int32_t s_pool = -1;
 static int s_ready = 0;
@@ -221,6 +224,83 @@ int art_table_lookup(const char *titleId, char *name, size_t name_cap,
     return 0;
 }
 
+/* HTTPS GET over TLS (port 443) for the same TMDB paths. Uses the shared
+ * chunked-aware HTTP parser. Returns body bytes or <=0. */
+static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_status){
+    if(out_status) *out_status = 0;
+    if(!path || !out || cap < 2) return -1;
+    if(net_up() < 0) return -1;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    if(getaddrinfo(TMDB_HOST, "443", &hints, &res) != 0 || !res){
+        log_msg("tmdb: https dns fail");
+        return -1;
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd < 0){ freeaddrinfo(res); return -1; }
+    struct timeval tv = { .tv_sec = TMDB_HTTPS_DEADLINE_S, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
+        log_msg("tmdb: https connect fail");
+        freeaddrinfo(res); close(fd); return -1;
+    }
+    freeaddrinfo(res);
+    {
+        int fl = fcntl(fd, F_GETFL, 0);
+        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+#else
+    return -1; /* OpenOrbis app builds keep the plain-HTTP path only. */
+#endif
+    tls_ctx_t *t = tls_start(fd, TMDB_HOST);
+    if(!t){
+#ifdef ORBISRPC_SDK_PAYLOAD
+        close(fd);
+#else
+        sceNetSocketClose(fd);
+#endif
+        return -1;
+    }
+    char req[512];
+    int rl = snprintf(req, sizeof req,
+        "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n",
+        path, TMDB_HOST);
+    if(rl <= 0 || rl >= (int)sizeof req){ tls_free(t); return -1; }
+    if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); return -1; }
+    static char raw[TMDB_BODY_MAX];
+    size_t bl = 0;
+    int64_t dl = orbis_mono_s() + TMDB_HTTPS_DEADLINE_S + 10;
+    for(;;){
+        char tmp[1024];
+        int r = tls_read(t, tmp, sizeof tmp - 1);
+        if(r < 0) break;
+        if(r == 0){
+            if(orbis_mono_s() > dl) break;
+            usleep(20000);
+            continue;
+        }
+        if(bl + (size_t)r >= sizeof raw) break;
+        memcpy(raw + bl, tmp, (size_t)r);
+        bl += (size_t)r;
+        if(orbis_mono_s() > dl) break;
+    }
+    tls_free(t);
+    if(bl == 0) return -1;
+    int st = 0;
+    size_t olen = 0;
+    char *body = upd_parse_response(raw, bl, cap, &st, &olen, NULL, 0);
+    if(out_status) *out_status = st;
+    if(!body || st != 200){ free(body); return -1; }
+    if(olen >= cap){ free(body); return -1; }
+    memcpy(out, body, olen);
+    out[olen] = 0;
+    free(body);
+    return (int)olen;
+}
+
 int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
                  char *icon, size_t icon_cap){
     if(!titleId || !name || name_cap == 0) return -1;
@@ -254,6 +334,13 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
     static char body[TMDB_BODY_MAX];
     int status = 0;
     int n = http_get(TMDB_HOST, path, body, sizeof body, &status);
+    if(n <= 0){
+        /* Port 80 is blocked from jailbroken consoles; Sony also answers
+         * the same paths over TLS (443). Try HTTPS before giving up so
+         * new installs resolve live like everything else. */
+        n = https_get_tmdb(path, body, sizeof body, &status);
+        if(n > 0) log_msg("tmdb: live via https for %s", titleId);
+    }
     if(n <= 0){ log_msg("tmdb: fetch fail status=%d", status); return -1; }
     char iname[128] = "", iicon[256] = "";
     if(tmdb_parse(body, (size_t)n, iname, sizeof iname, iicon, sizeof iicon) != 0){
