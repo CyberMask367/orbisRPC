@@ -22,7 +22,11 @@ static int pid_live(int pid){
     while(off + 4 <= sz){
         int recsz = *(int *)(buf + off);
         if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        if(recsz >= 76 && *(int *)(buf + off + 72) == pid) return 1;
+        /* A recycled PID owned by a system daemon must not block us:
+         * only a live payload process counts as a peer. Spawned
+         * payloads (elfldr/GoldHEN) show up as "Payload". */
+        if(recsz >= 479 && *(int *)(buf + off + 72) == pid)
+            return !memcmp(buf + off + 447, "Payload", 8);
         off += (size_t)recsz;
     }
     return 0;
