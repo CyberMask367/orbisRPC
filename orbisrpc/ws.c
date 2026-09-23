@@ -19,6 +19,7 @@
 #include <errno.h>
 #include <stdio.h>
 #else
+#include <fcntl.h>
 #include <orbis/Net.h>
 #include <orbis/Sysmodule.h>
 #include <netinet/in.h>

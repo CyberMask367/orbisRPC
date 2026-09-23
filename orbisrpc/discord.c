@@ -26,8 +26,23 @@
 
 static void make_key(char *out){
     unsigned char b[16];
+    memset(b, 0, sizeof b);
     int fd=open("/dev/urandom",O_RDONLY);
-    if(fd>=0){ read(fd,b,16); close(fd); }
+    if(fd>=0){
+        size_t got = 0;
+        while(got < sizeof b){
+            long r = read(fd, (char *)b + got, sizeof b - got);
+            if(r <= 0) break;
+            got += (size_t)r;
+        }
+        close(fd);
+        if(got < sizeof b){
+            /* short read: mix time in rather than leaving stack bytes */
+            uint32_t t = (uint32_t)time(NULL);
+            for(size_t i = got; i < sizeof b; i++, t = t*1664525u + 1013904223u)
+                b[i] ^= (unsigned char)(t >> 24);
+        }
+    }
     else { for(int i=0;i<16;i++) b[i]=(unsigned char)(time(NULL)+i*7); }
     b64_encode(b,16,out);
 }
