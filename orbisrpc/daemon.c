@@ -15,6 +15,7 @@
  */
 #include "cfg.h"
 #include "clock.h"
+#include "lock.h"
 #include "log.h"
 #include "ws.h"
 #include "discord.h"
@@ -75,6 +76,13 @@ int daemon_run(const char *fixed_game_name){
     }
     log_init(LOG_PATH);
     log_msg("orbisRPC daemon start — build %s %s", __DATE__, __TIME__);
+    /* Single writer: a second launch (or a stale pileup from repeated
+     * injections) stands down instead of fighting over the gateway. */
+    {
+        int lr = lock_acquire();
+        if(lr == 1){ log_msg("another daemon holds the lock; standing down"); log_close(); return 0; }
+        if(lr != 0) log_msg("WARN: lock error; continuing without guard");
+    }
     if(cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
         FILE *probe = fopen(CFG_PATH, "rb");

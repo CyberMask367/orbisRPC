@@ -41,6 +41,95 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <errno.h>
+#ifdef ORBISRPC_SDK_PAYLOAD
+#include <sys/types.h>
+#include <sys/sysctl.h>
+
+static int is_title_prefix(const char *n);
+
+/* --- SDK-build foreground/title signals (no ShellCoreUtil/UserService) ---
+ * A launched game shows up as an "eboot.bin" process; its identity comes
+ * from the freshest savedata dir (gameplay writes saves continuously).
+ * Both facts verified live via probes before wiring them in. */
+static int proc_has_eboot(void){
+    int mib[4] = { 1, 14, 8, 0 };
+    size_t sz = 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return 0;
+    static unsigned char buf[256*1024];
+    if(sz > sizeof buf) return 0;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return 0;
+    size_t off = 0;
+    while(off + 4 <= sz){
+        int recsz = *(int *)(buf + off);
+        if(recsz <= 0 || off + (size_t)recsz > sz) break;
+        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+            return 1;
+        off += (size_t)recsz;
+    }
+    return 0;
+}
+
+static long scan_newest_save(char *out, size_t cap){
+    static const char *users[] = { "1898cd02", "1898cd03", NULL };
+    /* user dirs vary per console; probe the known ones plus a scan of
+     * /user/home for anything looking like a user id dir. */
+    char udirs[8][32];
+    int ndirs = 0;
+    DIR *hd = opendir("/user/home");
+    if(hd){
+        struct dirent *e;
+        while((e = readdir(hd)) && ndirs < 8){
+            if(e->d_name[0] == '.') continue;
+            strncpy(udirs[ndirs], e->d_name, 31);
+            udirs[ndirs][31] = 0;
+            ndirs++;
+        }
+        closedir(hd);
+    }
+    for(int i = 0; users[i] && ndirs < 8; i++){
+        int dup = 0;
+        for(int k = 0; k < ndirs; k++) if(!strcmp(udirs[k], users[i])) dup = 1;
+        if(!dup){ strncpy(udirs[ndirs], users[i], 31); udirs[ndirs][31] = 0; ndirs++; }
+    }
+    long best = -1;
+    out[0] = 0;
+    for(int u = 0; u < ndirs; u++){
+        char spath[96];
+        snprintf(spath, sizeof spath, "/user/home/%s/savedata", udirs[u]);
+        DIR *sd = opendir(spath);
+        if(!sd) continue;
+        struct dirent *e;
+        while((e = readdir(sd))){
+            if(e->d_name[0] == '.') continue;
+            if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
+            char tp[160];
+            snprintf(tp, sizeof tp, "%s/%s", spath, e->d_name);
+            struct stat st;
+            /* newest write inside the title dir wins */
+            DIR *td = opendir(tp);
+            long tb = -1;
+            if(td){
+                struct dirent *f;
+                while((f = readdir(td))){
+                    if(f->d_name[0] == '.') continue;
+                    char fp[220];
+                    snprintf(fp, sizeof fp, "%s/%s", tp, f->d_name);
+                    struct stat fs;
+                    if(stat(fp, &fs) == 0 && fs.st_mtime > tb) tb = fs.st_mtime;
+                }
+                closedir(td);
+            }
+            if(tb < 0){
+                struct stat ds;
+                if(stat(tp, &ds) == 0) tb = ds.st_mtime;
+            }
+            if(tb > best){ best = tb; strncpy(out, e->d_name, cap-1); out[cap-1] = 0; }
+        }
+        closedir(sd);
+    }
+    return out[0] ? 0 : -1;
+}
+#endif
 
 static int s_user_inited = 0;
 static int s_user_ok = 0;
@@ -83,10 +172,16 @@ static int scu_init(void){
 
 /* --- foreground-active: the core "a game is running" signal ---------- */
 int detect_foreground_active(void){
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* Spawned processes see no ShellCoreUtil/UserService; the eboot.bin
+     * process itself is the signal (system has no other eboot). */
+    return proc_has_eboot();
+#else
     if(scu_init() && s_is_app_launched){
         int on = s_is_app_launched();
         return (on != 0) ? 1 : 0;   /* 0 when sitting on the home screen */
     }
+#endif
     /* fallback: foreground user exists. If UserService itself failed,
      * report inactive instead of guessing "playing". */
     if(user_init() != 0) return 0;
@@ -253,8 +348,23 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     out_name[0] = 0;
     if(out_path && p_cap) out_path[0] = 0;
     if(!detect_foreground_active()) return -1;
-    char titleId[16]=""; int named=0;
-    if(scan_recent_titleid(titleId,sizeof titleId)==0){
+    char titleId[16]=""; int named=0, have_tid=0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* Spawned processes see no ShellCoreUtil/UserService and /data/app is
+     * invisible; identity comes from the freshest savedata instead. */
+    if(scan_newest_save(titleId,sizeof titleId)==0){
+        have_tid = 1;
+        remember_titleid(titleId);
+        s_last_art[0] = 0;
+    } else return -1;
+#else
+    have_tid = (scan_recent_titleid(titleId,sizeof titleId)==0);
+    if(have_tid){
+        remember_titleid(titleId);
+        s_last_art[0] = 0;
+    }
+#endif
+    if(have_tid){
         remember_titleid(titleId);
         s_last_art[0] = 0;
         if(cached_resolve(titleId, out_name, cap)){
