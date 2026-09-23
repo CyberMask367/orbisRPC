@@ -14,6 +14,7 @@
 #include "log.h"
 #include "art.h"
 #include "jsonlite.h"
+#include "detect.h"
 #include <fcntl.h>
 #include <unistd.h>
 #include <string.h>
@@ -246,7 +247,15 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_val_t *act=jl_new_object();
     if(!act) return -1;
     jl_obj_set(act,"name",jl_new_string(name?name:""));
-    jl_obj_set(act,"type",jl_new_int(0)); /* Playing */
+    {
+        /* Media apps (Netflix/YouTube/...) post Watching/Listening. */
+        int atype = 0;
+        if(title_id && title_id[0]){
+            atype = detect_media_type(title_id);
+            if(atype != 0 && atype != 2 && atype != 3) atype = 0;
+        }
+        jl_obj_set(act,"type",jl_new_int(atype)); /* 0 Playing */
+    }
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
     if(title_id&&title_id[0]) jl_obj_set(act,"details",jl_new_string(title_id));
     if(started_epoch>0){

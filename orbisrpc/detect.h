@@ -15,4 +15,7 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap);
 const char *detect_last_titleid(void);
 /* Last resolved artwork URL (Sony CDN via TMDB, or empty). */
 const char *detect_last_art(void);
+/* Media type for presence: 0 Playing (games), 2 Listening, 3 Watching.
+ * Only known media apps map; everything else is 0. Extend freely. */
+int detect_media_type(const char *title_id);
 #endif

@@ -35,3 +35,8 @@
 2. Klog is a live firehose: capture across the send window, not after.
 3. `log.txt` absent always means "never executed", never "crashed later".
 4. Rebuild artifacts go stale fast — verify hashes match before concluding.
+5. **Never FTP-upload `.prx`/SELF files**: the console-side path
+   deterministically converts SELF containers to raw ELF on write
+   (verified: 1,476,032-byte PRX repeatedly lands as a 1,719,072-byte
+   ELF, different hash; random bytes and PKGs round-trip perfectly).
+   Deliver plugins via PKG install only.

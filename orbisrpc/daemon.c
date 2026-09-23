@@ -24,7 +24,10 @@
 #include "detect.h"
 #include "updater.h"
 #include "version.h"
+#include "jsonlite.h"
 #include <sys/stat.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
@@ -59,6 +62,41 @@ static int have_token(const cfg_t *c){
             return 1;
     }
     return 0;
+}
+
+/* Persist the live session (atomic tmp+rename). Called on every
+ * transition and on clear so a restart resumes instead of resetting. */
+static void sess_save(const char *tid, const char *name, int64_t started){    jl_val_t *r = jl_new_object();
+    if(!r) return;
+    jl_obj_set(r, "title_id", jl_new_string(tid ? tid : ""));
+    jl_obj_set(r, "name", jl_new_string(name ? name : ""));
+    jl_obj_set(r, "started", jl_new_number((double)started));
+    jl_obj_set(r, "saved_at", jl_new_number((double)time(NULL)));
+    char *s = jl_stringify(r);
+    jl_free(r);
+    if(!s) return;
+    FILE *f = fopen("/data/orbisRPC/session.json.new", "wb");
+    if(f){
+        int ok = (fputs(s, f) >= 0) && (fflush(f) == 0);
+        if(fclose(f) != 0) ok = 0;
+        if(ok) rename("/data/orbisRPC/session.json.new",
+                      "/data/orbisRPC/session.json");
+        else remove("/data/orbisRPC/session.json.new");
+    }
+    free(s);
+}
+
+/* Playtime ledger: append-only "<title_id> <name> <seconds>" per finished
+ * session. Totals are computed by readers (app/docs); the daemon only
+ * appends, so a corrupt ledger can never break the runtime. */
+static void ledger_append(const char *tid, const char *name,
+                          int64_t started, int64_t ended){
+    if(!tid || !tid[0] || ended <= started || started <= 0) return;
+    FILE *f = fopen("/data/orbisRPC/playtime.log", "ab");
+    if(!f) return;
+    fprintf(f, "%s %s %lld\n", tid, (name && name[0]) ? name : "?",
+            (long long)(ended - started));
+    fclose(f);
 }
 
 /* fixed_game_name != NULL -> post presence for that game only, no detection.
@@ -200,6 +238,48 @@ int daemon_run(const char *fixed_game_name){
          * timer resumes instead of resetting to 0:00. */
         static char prev_tid[16] = "";
         static int64_t prev_started = 0, prev_end = 0;
+        /* Cross-restart resume: a previous run's session (saved on every
+         * transition) seeds the resume window, so reboots and updates
+         * keep the timer instead of resetting it. */
+        {
+            static int sess_restored = 0;
+            if(!sess_restored){
+                sess_restored = 1;
+                char sj[256];
+                FILE *sf = fopen("/data/orbisRPC/session.json", "rb");
+                if(sf){
+                    fseek(sf, 0, SEEK_END);
+                    long ssz = ftell(sf);
+                    fseek(sf, 0, SEEK_SET);
+                    if(ssz > 0 && ssz < 1024){
+                        char *sb = (char*)malloc((size_t)ssz + 1);
+                        if(sb && fread(sb, 1, (size_t)ssz, sf) == (size_t)ssz){
+                            sb[ssz] = 0;
+                            jl_val_t *sr = jl_parse(sb, (size_t)ssz);
+                            if(sr && sr->type == JL_OBJECT){
+                                const jl_val_t *t = jl_obj_get(sr, "title_id");
+                                const jl_val_t *s2 = jl_obj_get(sr, "started");
+                                if(t && t->type == JL_STRING && t->str &&
+                                   s2 && s2->type == JL_NUMBER){
+                                    strncpy(prev_tid, t->str, sizeof prev_tid-1);
+                                    prev_started = (int64_t)s2->num;
+                                    /* Wall saved_at can't mix with the
+                                     * monotonic resume window: start the
+                                     * window at boot. Same title seen
+                                     * within minutes of boot resumes. */
+                                    prev_end = orbis_mono_s();
+                                    log_msg("session restored: %s (timer may resume)",
+                                            prev_tid);
+                                }
+                                jl_free(sr);
+                            }
+                            free(sb);
+                        } else if(sb) free(sb);
+                    }
+                    fclose(sf);
+                }
+            }
+        }
         /* Transition debounce: shell flickers during launches, so a new
          * title (or disappearance) needs consecutive polls (2 at ~1s). */
         static char cand_title[16] = "";
@@ -259,6 +339,12 @@ int daemon_run(const char *fixed_game_name){
                     miss_hits = 0;
                     if(fixed_game_name || cand_hits >= 2){
                     if(!active || strncmp(cur_tid,sess_tid,sizeof sess_tid)!=0){
+                        /* Switching away from a live session: bank its time.
+                         * (Fresh starts and resumes have nothing to bank;
+                         * the clear path already banked ended sessions.) */
+                        if(active && sess_tid[0] &&
+                           strncmp(cur_tid,sess_tid,sizeof sess_tid)!=0)
+                            ledger_append(sess_tid, last, started, time_fixed());
                         active = 1;
                         strncpy(sess_tid, cur_tid, sizeof sess_tid-1);
                         strncpy(last, name, sizeof last-1);
@@ -274,6 +360,7 @@ int daemon_run(const char *fixed_game_name){
                         }
                         need_post = 1;
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
+                        sess_save(cur_tid, name, started);
                     } else if(strncmp(name,last,sizeof last)!=0){
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;
@@ -293,9 +380,11 @@ int daemon_run(const char *fixed_game_name){
                     if(++miss_hits >= 2){
                         discord_clear_presence(&dc);
                         log_msg("presence cleared");
+                        ledger_append(sess_tid, last, started, time_fixed());
                         strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
                         prev_started = started;
                         prev_end = now;
+                        remove("/data/orbisRPC/session.json");
                         last[0]=0; sess_tid[0]=0; active=0; started=0;
                         home_posted = 0;
                     }

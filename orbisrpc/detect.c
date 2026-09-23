@@ -216,6 +216,20 @@ static char s_res_titleid[16] = "";
 static char s_res_name[128] = "";
 static char s_res_art[256] = "";
 static int s_res_valid = 0;
+/* Media apps post Watching/Listening instead of Playing. IDs verified
+ * against Sony TMDB (names resolve there too). */
+int detect_media_type(const char *title_id){
+    static const struct { const char *id; int type; } media[] = {
+        { "CUSA00127", 3 }, /* Netflix -> Watching */
+        { "CUSA01015", 3 }, /* YouTube -> Watching */
+    };
+    if(!title_id) return 0;
+    for(unsigned i = 0; i < sizeof media/sizeof media[0]; i++){
+        if(!strcmp(title_id, media[i].id)) return media[i].type;
+    }
+    return 0;
+}
+
 const char *detect_last_titleid(void){ return s_last_titleid[0] ? s_last_titleid : NULL; }
 const char *detect_last_art(void){ return s_last_art[0] ? s_last_art : NULL; }
 static void remember_resolved(const char *ti, const char *name, const char *art){
