@@ -15,7 +15,7 @@ OUT="build-sdk"
 mkdir -p "$OUT"
 CFLAGS="-O2 -Wall -DORBISRPC_SDK_PAYLOAD -Iorbisrpc -Ithird_party/mbedtls/include"
 echo "=== daemon sources (SDK) ==="
-for f in log cfg jsonlite b64 sfo tmdb_crypto tmdb updater updater_util tls ws detect discord daemon compat clock lock timesync main; do
+for f in log cfg jsonlite b64 sfo tmdb_crypto tmdb updater updater_util tls ws detect discord daemon compat clock lock timesync art main; do
   # clock has no .c (header-only helper lives in compat.c); skip if missing
   [ -f "orbisrpc/$f.c" ] || continue
   "$CC" $CFLAGS -c -o "$OUT/$f.o" "orbisrpc/$f.c" || { echo "FAIL: $f"; exit 1; }

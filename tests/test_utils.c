@@ -4,6 +4,7 @@
 #include "../orbisrpc/tmdb_crypto.h"
 #include "../orbisrpc/updater.h"
 #include "../orbisrpc/nametable.h"
+#include "../orbisrpc/art.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -182,6 +183,23 @@ static void test_nametable(void) {
     assert(nametable_lookup("CUSA00740", out, 4) == 0);
     assert(out[3] == 0);
 }
+static void test_art_parse(void) {
+    /* Real external-assets response shape (verified against live API). */
+    const char *body = "[{\"url\":\"https://example.com/a.png\","
+        "\"external_asset_path\":\"external/ABC/https/example.com/a.png\"},"
+        "{\"url\":\"https://example.com/b.png\","
+        "\"external_asset_path\":\"external/DEF/https/example.com/b.png\"}]";
+    char out[128] = {0};
+    assert(art_parse_mp(body, strlen(body),
+                        "https://example.com/b.png", out, sizeof out) == 1);
+    assert(strcmp(out, "mp:external/DEF/https/example.com/b.png") == 0);
+    assert(art_parse_mp(body, strlen(body),
+                        "https://example.com/zzz.png", out, sizeof out) == 0);
+    assert(art_parse_mp("[]", 2, "x", out, sizeof out) == 0);
+    assert(art_parse_mp(NULL, 0, "x", out, sizeof out) == 0);
+    assert(art_resolve_mp("1", "t", "https://example.com/a.png", out, sizeof out) == 0);
+}
+
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -204,6 +222,7 @@ int main(void) {
     test_sfo();
     test_nametable();
     test_base64();
+    test_art_parse();
     puts("utility tests passed");
     return 0;
 }

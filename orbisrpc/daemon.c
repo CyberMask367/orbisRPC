@@ -174,12 +174,21 @@ int daemon_run(const char *fixed_game_name){
         static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
         int64_t last_alive = 0;
+        static int home_posted = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
             int64_t now = orbis_mono_s();
             if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
             if(now != last_poll){
+                /* Sleep/wake detection without a suspend API: if the loop
+                 * itself froze (Rest Mode), mono jumps and heartbeats died.
+                 * Log it and force a re-post so presence resumes cleanly. */
+                if(last_poll != 0 && now - last_poll > 120){
+                    log_msg("wake: loop was frozen %llds (likely Rest Mode); resuming",
+                            (long long)(now - last_poll));
+                    need_post = active && last[0];
+                }
                 last_poll = now;
                 if(now - last_alive >= 60){
                     last_alive = now;
@@ -247,7 +256,17 @@ int daemon_run(const char *fixed_game_name){
                         prev_started = started;
                         prev_end = now;
                         last[0]=0; sess_tid[0]=0; active=0; started=0;
+                        home_posted = 0;
                     }
+                } else if(!home_posted){
+                    /* Home screen support: no game running. Post a timerless
+                     * home presence once (instead of bare online), clear it
+                     * the moment a game commits. */
+                    const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
+                    discord_set_presence_ex(&dc, state, "PlayStation 4", NULL,
+                                            g_cfg.application_id, NULL, NULL, 0);
+                    log_msg("presence: home");
+                    home_posted = 1;
                 }
             }
 

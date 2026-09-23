@@ -12,6 +12,7 @@
 #include "clock.h"
 #include "b64.h"
 #include "log.h"
+#include "art.h"
 #include "jsonlite.h"
 #include <fcntl.h>
 #include <unistd.h>
@@ -249,19 +250,38 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
         if(!art_warned){ art_warned = 1;
             log_msg("art: no application_id or art_base_url; presence sends without artwork"); }
     }
-    /* Artwork: asset KEYS into our own application only (verified on
-     * hardware 2026-09-23). External-URL large_image makes Discord drop
-     * the ENTIRE activity, so URLs are never sent — upload each title's
-     * icon in the developer portal (key = lowercase title id) instead. */
-    (void)art_url; (void)art_base_url;
+    /* Artwork (verified on hardware 2026-09-23): raw https URLs and
+     * dangling keys drop the whole activity. Two working forms, tried in
+     * order: (1) mp: proxy resolved via external-assets for the URL we
+     * have (Sony CDN or art_base_url pack); (2) uploaded asset key. */
     if(title_id&&title_id[0]&&application_id&&application_id[0]){
-        char key[16];
-        if(asset_key(title_id, key, sizeof key) >= 4){
+        char mp[512] = "";
+        const char *src_url = (art_url&&art_url[0]) ? art_url : NULL;
+        char pack_url[320] = "";
+        if(!src_url && art_base_url&&art_base_url[0]&&title_id){
+            char key[16];
+            if(asset_key(title_id, key, sizeof key) >= 4){
+                int n=snprintf(pack_url,sizeof pack_url,"%s%s.png",art_base_url,key);
+                if(n>0 && (size_t)n<sizeof pack_url) src_url = pack_url;
+            }
+        }
+        if(src_url && d->token[0] &&
+           art_resolve_mp(application_id, d->token, src_url, mp, sizeof mp)){
             jl_val_t *as=jl_new_object();
             if(as){
-                jl_obj_set(as,"large_image",jl_new_string(key));
+                jl_obj_set(as,"large_image",jl_new_string(mp));
                 jl_obj_set(as,"large_text",jl_new_string(name?name:""));
                 jl_obj_set(act,"assets",as);
+            }
+        } else {
+            char key[16];
+            if(asset_key(title_id, key, sizeof key) >= 4){
+                jl_val_t *as=jl_new_object();
+                if(as){
+                    jl_obj_set(as,"large_image",jl_new_string(key));
+                    jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+                    jl_obj_set(act,"assets",as);
+                }
             }
         }
     }
