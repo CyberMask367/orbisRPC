@@ -89,8 +89,38 @@ static int proc_has_eboot(void){
     return 0;
 }
 
-static long scan_newest_save(char *out, size_t cap){
-    static const char *users[] = { "1898cd02", "1898cd03", NULL };
+/* Sandbox mounts: /mnt/sandbox/<TITLE>_000 exists exactly while that
+ * title's game process lives. This is authoritative foreground identity
+ * straight from the OS — no heuristics, no races, no sync pollution.
+ * Verified live: only the running game's mount is listed. */
+static int scan_sandbox_mount(char *out, size_t cap){
+    if(!out || cap < 10) return -1;
+    DIR *d = opendir("/mnt/sandbox");
+    if(!d) return -1;
+    struct dirent *e;
+    int found = 0;
+    char best[16] = "";
+    while((e = readdir(d))){
+        const char *n = e->d_name;
+        if(strlen(n) != 13) continue; /* TITLEID_000 */
+        if(n[9] != '_' || n[10] != '0' || n[11] != '0' || n[12] != '0') continue;
+        char tid[16];
+        memcpy(tid, n, 9);
+        tid[9] = 0;
+        if(!is_title_prefix(tid)) continue;
+        if(!found){
+            strncpy(best, tid, sizeof best - 1);
+            found = 1;
+        }
+    }
+    closedir(d);
+    if(!found) return -1;
+    strncpy(out, best, cap - 1);
+    out[cap - 1] = 0;
+    return 0;
+}
+
+static long scan_newest_save(char *out, size_t cap){    static const char *users[] = { "1898cd02", "1898cd03", NULL };
     /* user dirs vary per console; probe the known ones plus a scan of
      * /user/home for anything looking like a user id dir. */
     char udirs[8][32];
@@ -452,9 +482,13 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     }
     char titleId[16]=""; int named=0, have_tid=0;
 #ifdef ORBISRPC_SDK_PAYLOAD
-    /* Spawned processes see no ShellCoreUtil/UserService and /data/app is
-     * invisible; identity comes from the freshest savedata instead. */
-    if(scan_newest_save(titleId,sizeof titleId)==0){
+    /* Sandbox mount first: authoritative OS-level identity. Save-scan
+     * stays as fallback (its mtimes get bulk-touched by cloud sync). */
+    if(scan_sandbox_mount(titleId, sizeof titleId) == 0){
+        have_tid = 1;
+        remember_titleid(titleId);
+        s_last_art[0] = 0;
+    } else if(scan_newest_save(titleId,sizeof titleId)==0){
         have_tid = 1;
         remember_titleid(titleId);
         s_last_art[0] = 0;

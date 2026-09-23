@@ -321,8 +321,10 @@ int daemon_run(const char *fixed_game_name){
 #ifdef ORBISRPC_SDK_PAYLOAD
                 /* Launch/close shortcut: the eboot set changing means the
                  * foreground game changed RIGHT NOW. Reset debounce so the
-                 * switch commits next poll instead of lagging minutes
-                 * behind stale filesystem signals. */
+                 * switch commits within ~2 polls. Deliberately NOT instant:
+                 * the title scan needs one poll for fresh atime data, and
+                 * committing a stale scan instantly would lock the wrong
+                 * title with a full session. */
                 {
                     static int last_eboots = -1;
                     int nboots = detect_eboot_count();
