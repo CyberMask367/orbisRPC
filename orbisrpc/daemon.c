@@ -158,6 +158,11 @@ int daemon_run(const char *fixed_game_name){
         static char last[128] = "";
         static char sess_tid[16] = "";
         static int64_t started = 0;
+        /* Resume window: if the same title vanishes briefly (detection
+         * flicker, quick menu hop) and returns within 10 minutes, the
+         * timer resumes instead of resetting to 0:00. */
+        static char prev_tid[16] = "";
+        static int64_t prev_started = 0, prev_end = 0;
         /* Transition debounce: shell flickers during launches, so a new
          * title (or disappearance) needs consecutive polls (2 at ~1s). */
         static char cand_title[16] = "";
@@ -197,7 +202,15 @@ int daemon_run(const char *fixed_game_name){
                         strncpy(sess_tid, cur_tid, sizeof sess_tid-1);
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;
-                        started = time(NULL);
+                        if(!strncmp(cur_tid, prev_tid, sizeof prev_tid) &&
+                           prev_started > 0 &&
+                           now - prev_end < 600){
+                            started = prev_started;
+                            log_msg("SESSION_RESUMED title=%s (gap %llds, timer kept)",
+                                    cur_tid[0]?cur_tid:"?", (long long)(now - prev_end));
+                        } else {
+                            started = time(NULL);
+                        }
                         need_post = 1;
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
                     } else if(strncmp(name,last,sizeof last)!=0){
@@ -219,6 +232,9 @@ int daemon_run(const char *fixed_game_name){
                     if(++miss_hits >= 2){
                         discord_clear_presence(&dc);
                         log_msg("presence cleared");
+                        strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
+                        prev_started = started;
+                        prev_end = now;
                         last[0]=0; sess_tid[0]=0; active=0; started=0;
                     }
                 }
