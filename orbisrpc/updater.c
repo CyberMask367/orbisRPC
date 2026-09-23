@@ -20,11 +20,19 @@
 
 /* ---- PS4 HTTPS transport (mirrors ws.c/tmdb.c bring-up) ---- */
 #include "tls.h"
+#ifdef ORBISRPC_SDK_PAYLOAD
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <fcntl.h>
+#else
 #include <orbis/Net.h>
 #include <orbis/Sysmodule.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#endif
 #include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
@@ -41,6 +49,10 @@ static int32_t s_upool = -1;
 static int upd_net(void){
     static int ready = 0;
     if(ready) return 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    ready = 1;
+    return 0;
+#else
     uint32_t ur = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     if((int)ur < 0) return -1;
     if(sceNetInit() < 0) return -1;
@@ -48,10 +60,38 @@ static int upd_net(void){
     if(s_upool < 0) return -1;
     ready = 1;
     return 0;
+#endif
 }
 
 static int upd_connect(const char *host, int port){
     if(upd_net() < 0) return -1;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    {
+        char portbuf[16];
+        snprintf(portbuf, sizeof portbuf, "%d", port);
+        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
+            log_msg("updater: dns fail");
+            return -1;
+        }
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd < 0){ freeaddrinfo(res); return -1; }
+    struct timeval tv = { .tv_sec = UPD_DEADLINE_S, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
+        close(fd); freeaddrinfo(res); return -1;
+    }
+    freeaddrinfo(res);
+    {
+        int fl = fcntl(fd, F_GETFL, 0);
+        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+    return fd;
+#else
     OrbisNetInAddr in;
     memset(&in, 0, sizeof in);
     int32_t rid = sceNetResolverCreate("updR", (uint32_t)s_upool, 0);
@@ -74,6 +114,7 @@ static int upd_connect(const char *host, int port){
     int nb = 1;
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &nb, sizeof nb);
     return fd;
+#endif
 }
 
 /* HTTPS GET, returns heap body (caller frees) with out_len/out_status. */
@@ -84,7 +125,14 @@ static char *https_get(const char *host, const char *path,
     int fd = upd_connect(host, 443);
     if(fd < 0) return NULL;
     tls_ctx_t *t = tls_start(fd, host);
-    if(!t){ sceNetSocketClose(fd); return NULL; }
+    if(!t){
+#ifdef ORBISRPC_SDK_PAYLOAD
+        close(fd);
+#else
+        sceNetSocketClose(fd);
+#endif
+        return NULL;
+    }
     char req[512];
     int rl = snprintf(req, sizeof req,
         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: orbisRPC/%s\r\nConnection: close\r\n\r\n",

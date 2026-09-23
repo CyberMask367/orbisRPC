@@ -5,11 +5,21 @@
 #include "clock.h"
 #include "tmdb_crypto.h"
 #include "log.h"
+#ifdef ORBISRPC_SDK_PAYLOAD
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <unistd.h>
+#else
 #include <orbis/Net.h>
 #include <orbis/Sysmodule.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -28,6 +38,11 @@ static int s_ready = 0;
  * init inside game processes. */
 static int net_up(void){
     if(s_ready) return 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* BSD sockets need no init. */
+    s_ready = 1;
+    return 0;
+#else
     uint32_t ur = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     if((int)ur < 0){ log_msg("tmdb: load NET fail %d", (int)ur); return -1; }
     if(sceNetInit() < 0){ log_msg("tmdb: sceNetInit fail"); return -1; }
@@ -35,6 +50,7 @@ static int net_up(void){
     if(s_pool < 0){ log_msg("tmdb: net pool fail %d", (int)s_pool); return -1; }
     s_ready = 1;
     return 0;
+#endif
 }
 
 /* Minimal blocking HTTP GET with deadline. Returns body bytes, or -1. */
@@ -42,6 +58,29 @@ static int http_get(const char *host, const char *path,
                     char *body, size_t cap, int *out_status){
     if(out_status) *out_status = 0;
     if(net_up() < 0) return -1;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    {
+        char portbuf[16];
+        snprintf(portbuf, sizeof portbuf, "%d", TMDB_PORT);
+        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
+            log_msg("tmdb: dns fail");
+            return -1;
+        }
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd < 0){ log_msg("tmdb: socket fail"); freeaddrinfo(res); return -1; }
+    struct timeval tv = { .tv_sec = TMDB_DEADLINE_S, .tv_usec = 0 };
+    setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
+    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
+        log_msg("tmdb: connect fail"); freeaddrinfo(res); close(fd); return -1;
+    }
+    freeaddrinfo(res);
+#else
     OrbisNetInAddr in;
     memset(&in, 0, sizeof in);
     int ok = 0;
@@ -73,17 +112,31 @@ static int http_get(const char *host, const char *path,
     if(sceNetConnect(fd, &sa, sizeof sa) < 0){
         log_msg("tmdb: connect fail"); sceNetSocketClose(fd); return -1;
     }
+#endif
     char req[512];
     int rl = snprintf(req, sizeof req,
         "GET %s HTTP/1.0\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n",
         path, host);
-    if(rl <= 0 || rl >= (int)sizeof req){ sceNetSocketClose(fd); return -1; }
+    if(rl <= 0 || rl >= (int)sizeof req){
+#ifdef ORBISRPC_SDK_PAYLOAD
+        close(fd);
+#else
+        sceNetSocketClose(fd);
+#endif
+        return -1;
+    }
     int sent = 0;
     int64_t dl = orbis_mono_s() + TMDB_DEADLINE_S;
     while(sent < rl){
+#ifdef ORBISRPC_SDK_PAYLOAD
+        int r = (int)send(fd, req+sent, (size_t)(rl-sent), 0);
+        if(r > 0){ sent += r; continue; }
+        if(orbis_mono_s() > dl || r == 0){ close(fd); return -1; }
+#else
         int r = sceNetSend(fd, req+sent, rl-sent, 0);
         if(r > 0){ sent += r; continue; }
         if(orbis_mono_s() > dl || r == 0){ sceNetSocketClose(fd); return -1; }
+#endif
     }
     /* read headers then body; cap total */
     char hb[2048];
@@ -92,7 +145,11 @@ static int http_get(const char *host, const char *path,
     size_t bl = 0;
     for(;;){
         char tmp[1024];
+#ifdef ORBISRPC_SDK_PAYLOAD
+        int r = (int)recv(fd, tmp, sizeof tmp, 0);
+#else
         int r = sceNetRecv(fd, tmp, sizeof tmp, 0);
+#endif
         if(r <= 0) break;
         size_t off = 0;
         if(!hdr_done){
@@ -107,7 +164,11 @@ static int http_get(const char *host, const char *path,
                 /* off = body bytes already in this chunk */
                 if(off > (size_t)r) off = (size_t)r;
             } else if(hl >= sizeof hb - 1){
+#ifdef ORBISRPC_SDK_PAYLOAD
+                close(fd); return -1; /* headers too big */
+#else
                 sceNetSocketClose(fd); return -1; /* headers too big */
+#endif
             } else continue;
         }
         while(off < (size_t)r && bl < cap - 1){
@@ -116,7 +177,11 @@ static int http_get(const char *host, const char *path,
         if(bl >= cap - 1) break;
         if(orbis_mono_s() > dl) break;
     }
+#ifdef ORBISRPC_SDK_PAYLOAD
+    close(fd);
+#else
     sceNetSocketClose(fd);
+#endif
     body[bl] = 0;
     if(out_status) *out_status = status;
     if(status != 200 || bl == 0) return -1;

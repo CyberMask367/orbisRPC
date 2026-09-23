@@ -18,7 +18,13 @@
 #include <mbedtls/entropy.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/debug.h>
+#include <mbedtls/net_sockets.h> /* error codes only; transport is ours */
+#ifdef ORBISRPC_SDK_PAYLOAD
+#include <sys/socket.h>
+#include <errno.h>
+#else
 #include <orbis/Net.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <fcntl.h>
@@ -72,17 +78,33 @@ static int orbis_poll(void *data, unsigned char *out, size_t len, size_t *olen){
 static int net_send(void *ctx, const unsigned char *b, size_t n){
     tls_ctx_t *t = (tls_ctx_t *)ctx;
     size_t cap = n > 32768 ? 32768 : n;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    int r = (int)send(t->fd, b, cap, 0);
+    if(r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        return MBEDTLS_ERR_SSL_WANT_WRITE;
+    if(r < 0) return MBEDTLS_ERR_NET_SEND_FAILED;
+    return r;
+#else
     int r = (int)sceNetSend(t->fd, b, (int)cap, 0);
     if(r < 0) return MBEDTLS_ERR_SSL_WANT_WRITE; /* NBIO: retry till deadline */
     return r;
+#endif
 }
 
 static int net_recv(void *ctx, unsigned char *b, size_t n){
     tls_ctx_t *t = (tls_ctx_t *)ctx;
     size_t cap = n > 16384 ? 16384 : n;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    int r = (int)recv(t->fd, b, cap, 0);
+    if(r < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+        return MBEDTLS_ERR_SSL_WANT_READ;
+    if(r < 0) return MBEDTLS_ERR_NET_RECV_FAILED;
+    return r;
+#else
     int r = (int)sceNetRecv(t->fd, b, (int)cap, 0);
     if(r < 0) return MBEDTLS_ERR_SSL_WANT_READ; /* NBIO: retry till deadline */
     return r;
+#endif
 }
 
 tls_ctx_t *tls_start(int fd, const char *host){

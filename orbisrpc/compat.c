@@ -8,6 +8,35 @@
 #include <stdint.h>
 #include "clock.h"
 
+#ifdef ORBISRPC_SDK_PAYLOAD
+/* Payload-SDK builds: the SDK libc already provides errno, gmtime_r,
+ * clock_gettime and friends. Only the entropy poll + monotonic clock
+ * live here, written against plain POSIX. */
+int mbedtls_platform_entropy_poll(void *data, unsigned char *out,
+                                  size_t len, size_t *olen){
+    (void)data;
+    if(!out || len == 0) return -1;
+    int fd = open("/dev/urandom", O_RDONLY);
+    if(fd < 0) return -1;
+    size_t got = 0;
+    while(got < len){
+        long r = read(fd, (char *)out + got, len - got);
+        if(r <= 0){ close(fd); return -1; }
+        got += (size_t)r;
+    }
+    close(fd);
+    *olen = len;
+    return 0;
+}
+
+int64_t orbis_mono_s(void){
+    struct timespec ts;
+    if(clock_gettime(CLOCK_MONOTONIC, &ts) != 0) return (int64_t)time(NULL);
+    return (int64_t)ts.tv_sec;
+}
+
+#else
+
 int *__errno_location(void) __attribute__((weak));
 int *__errno_location(void){
     static int errno_slot;
@@ -90,3 +119,5 @@ int64_t orbis_mono_s(void){
     return (int64_t)ts.tv_sec;
 #endif
 }
+
+#endif /* ORBISRPC_SDK_PAYLOAD */

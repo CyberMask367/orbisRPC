@@ -23,9 +23,16 @@
 #include "sfo.h"
 #include "tmdb.h"
 #include "nametable.h"
+#ifdef ORBISRPC_SDK_PAYLOAD
+/* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
+ * there is no UserService here — user_init() below degrades. */
+#include <dlfcn.h>
+#include <stdint.h>
+#else
 #include <orbis/UserService.h>
 #include <orbis/libkernel.h>
 #include <orbis/Sysmodule.h>
+#endif
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -40,6 +47,12 @@ static int s_user_ok = 0;
 static int user_init(void){
     if(s_user_inited) return s_user_ok ? 0 : -1;
     s_user_inited = 1;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* No UserService in payload-SDK builds: ShellCoreUtil (dlopen) is the
+     * only foreground signal; without it we report inactive (fail closed). */
+    log_msg("UserService unavailable in SDK build; ShellCoreUtil only");
+    return -1;
+#else
     /* UserService is an external module -> load via internal id */
     uint32_t r = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_USER_SERVICE);
     if(r != 0){ int32_t ir=(int32_t)r; log_msg("load UserService fail %d", ir); return -1; }
@@ -47,6 +60,7 @@ static int user_init(void){
     if(rc != 0){ log_msg("UserService init fail %d", rc); return -1; }
     s_user_ok = 1;
     return 0;
+#endif
 }
 
 /* --- ShellCoreUtil runtime resolution ------------------------------- */
@@ -76,10 +90,16 @@ int detect_foreground_active(void){
     /* fallback: foreground user exists. If UserService itself failed,
      * report inactive instead of guessing "playing". */
     if(user_init() != 0) return 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* No UserService API in SDK builds (user_init always fails there,
+     * so this is unreachable); fail closed regardless. */
+    return 0;
+#else
     int32_t fg = -1;
     int32_t rc = sceUserServiceGetForegroundUser(&fg);
     if(rc != 0){ log_msg("GetForegroundUser err %d", rc); return 0; }
     return (fg >= 0) ? 1 : 0;
+#endif
 }
 
 /* --- title naming ---------------------------------------------------- */

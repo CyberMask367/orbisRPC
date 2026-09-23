@@ -8,11 +8,23 @@
 #include "clock.h"
 #include "tls.h"
 #include "log.h"
+#ifdef ORBISRPC_SDK_PAYLOAD
+/* Payload-SDK build: plain BSD sockets, no Sony modules. getaddrinfo
+ * replaces the kernel resolver; nothing needs initializing. */
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <fcntl.h>
+#include <errno.h>
+#include <stdio.h>
+#else
 #include <orbis/Net.h>
 #include <orbis/Sysmodule.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
+#endif
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -31,6 +43,11 @@ static int s_net_mem = 0;
 
 static int net_ensure(void){
     if(s_net_ready) return 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* BSD sockets need no init. */
+    s_net_ready = 1;
+    return 0;
+#else
     uint32_t ur = sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     if((int)ur < 0){ log_msg("load NET fail %d", (int)ur); return -1; }
     if(sceNetInit() < 0){ log_msg("sceNetInit fail"); return -2; }
@@ -41,6 +58,7 @@ static int net_ensure(void){
      * a crash recipe. The kernel resolver works fine with just the pool. */
     s_net_ready = 1;
     return 0;
+#endif
 }
 
 /* Write exactly n bytes of plaintext through the TLS engine. */
@@ -62,6 +80,49 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     w->rbuf = (unsigned char*)malloc(w->rcap);
     if(!w->rbuf){ log_msg("ws: rbuf alloc fail"); return -1; }
     if(net_ensure()<0) goto fail;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    /* Resolve via libc (works wherever BSD sockets do). */
+    struct addrinfo hints, *res = NULL;
+    memset(&hints, 0, sizeof hints);
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    {
+        char portbuf[16];
+        snprintf(portbuf, sizeof portbuf, "%d", port);
+        if(getaddrinfo(host, portbuf, &hints, &res) != 0 || !res){
+            log_msg("resolve fail: %s", host);
+            goto fail;
+        }
+    }
+    {
+        struct sockaddr_in *a = (struct sockaddr_in *)res->ai_addr;
+        unsigned char *q = (unsigned char *)&a->sin_addr.s_addr;
+        log_msg("dial %s -> %u.%u.%u.%u:%d", host, q[0], q[1], q[2], q[3], port);
+    }
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if(fd < 0){ log_msg("socket fail"); freeaddrinfo(res); goto fail; }
+    w->fd = fd; w->sock = fd;
+    {
+        struct timeval tv = { .tv_sec = 10, .tv_usec = 0 };
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
+    }
+    if(connect(fd, res->ai_addr, res->ai_addrlen) < 0){
+        log_msg("connect fail (syscall) to %s:%d", host, port);
+        freeaddrinfo(res);
+        goto fail;
+    }
+    freeaddrinfo(res);
+    {
+        struct timeval tv0 = { .tv_sec = 0, .tv_usec = 0 };
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv0, sizeof tv0);
+    }
+    {
+        int fl = fcntl(fd, F_GETFL, 0);
+        if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+    }
+    w->nb = 1;
+    log_msg("tcp established");
+#else
     /* memid = our net pool: passing 0 here fails with EBADF (0x80410109).
      * If pool creation failed, skip DNS and only allow IP literals. */
     int32_t rid = -1;
@@ -123,6 +184,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     sceNetSetsockopt(fd, SOL_SOCKET, SO_NBIO, &on, sizeof on);
     w->nb = 1;
     log_msg("tcp established");
+#endif
     /* TLS handshake over the established connection (mbedTLS, no external
      * module needed). Socket is NBIO; tls_start pumps it with a deadline. */
     w->tls = tls_start(fd, host);
@@ -177,7 +239,11 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     return 0;
 fail:
     tls_free((tls_ctx_t*)w->tls); w->tls=NULL;
+#ifdef ORBISRPC_SDK_PAYLOAD
+    if(w->fd > 0) close(w->fd);
+#else
     if(w->fd > 0)  sceNetSocketClose(w->fd);
+#endif
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
     w->connected=0; w->tls=NULL; w->fd=0; w->sock=0;
     return -9;
@@ -331,7 +397,11 @@ int ws_close(ws_t *w){
     }
     ws_send_control(w, 0x8); /* best-effort masked CLOSE */
     tls_free((tls_ctx_t*)w->tls);
+#ifdef ORBISRPC_SDK_PAYLOAD
+    close(w->fd);
+#else
     sceNetSocketClose(w->fd);
+#endif
     free(w->rbuf); w->rbuf=NULL; w->rcap=0;
     w->connected=0; w->sock=0; w->tls=NULL; w->fd=0; w->rlen=0; w->rpos=0;
     w->skip_left=0;
