@@ -1,3 +1,4 @@
+#define _XOPEN_SOURCE 700
 #include "../orbisrpc/jsonlite.h"
 #include "../orbisrpc/b64.h"
 #include "../orbisrpc/sfo.h"
@@ -5,6 +6,8 @@
 #include "../orbisrpc/updater.h"
 #include "../orbisrpc/nametable.h"
 #include "../orbisrpc/art.h"
+#include "../orbisrpc/health.h"
+#include "../orbisrpc/manifest.h"
 #include <assert.h>
 #include <stdio.h>
 #include <string.h>
@@ -200,6 +203,114 @@ static void test_art_parse(void) {
     assert(art_resolve_mp("1", "t", "https://example.com/a.png", out, sizeof out) == 0);
 }
 
+static void test_health_safe_mode(void) {
+    /* Unclean-boot marker semantics: normal reboots never count. */
+    char dir[] = "/tmp/orx_health_XXXXXX";
+    assert(mkdtemp(dir) != NULL);
+    health_set_base(dir);
+    health_mark_clean();
+    /* clean boot x3: counter stays 0, never safe mode */
+    assert(health_boot_note_crash() == 0);
+    health_mark_healthy();
+    assert(health_boot_note_crash() == 0);
+    health_mark_healthy();
+    assert(health_boot_note_crash() == 0);
+    /* now crash repeatedly WITHOUT going healthy: 1, 2, then safe */
+    assert(health_boot_note_crash() == 0); /* count=1 */
+    assert(health_boot_note_crash() == 0); /* count=2 */
+    assert(health_boot_note_crash() == 1); /* count=3 -> safe mode */
+    /* recovery clears */
+    health_mark_healthy();
+    assert(health_boot_note_crash() == 0);
+    health_mark_healthy();
+}
+
+static void test_health_stage_activate(void) {
+    /* Atomic staging: bad .new never touches live; rollback restores. */
+    char dir[] = "/tmp/orx_stage_XXXXXX";
+    assert(mkdtemp(dir) != NULL);
+    health_set_base(dir);
+    char live[256], tmp[256], bak[256];
+    snprintf(live, sizeof live, "%s/live.bin", dir);
+    snprintf(tmp, sizeof tmp, "%s/live.bin.new", dir);
+    snprintf(bak, sizeof bak, "%s/live.bin.bak", dir);
+    /* live = valid ELF stand-in (>=64B, ELF magic via updater_image_ok?
+     * use real check: write 64 zero bytes won't pass; stage path only
+     * needs .new validation, so craft minimal ELF header). */
+    unsigned char elf[128];
+    memset(elf, 0, sizeof elf);
+    elf[0] = 0x7f; elf[1] = 'E'; elf[2] = 'L'; elf[3] = 'F';
+    elf[4] = 2; elf[5] = 1; elf[18] = 62;
+    FILE *f = fopen(live, "wb");
+    assert(f); assert(fwrite(elf, 1, sizeof elf, f) == sizeof elf); fclose(f);
+    /* corrupt .new is refused, live untouched */
+    f = fopen(tmp, "wb");
+    assert(f); assert(fwrite("garbage-not-elf-at-all......................"
+                            "..............................", 1, 64, f) == 64);
+    fclose(f);
+    assert(health_stage_activate(live) != 0);
+    f = fopen(live, "rb");
+    assert(f);
+    unsigned char chk[4];
+    assert(fread(chk, 1, 4, f) == 4);
+    fclose(f);
+    assert(chk[0] == 0x7f && chk[1] == 'E');
+    /* valid .new activates, backup created, rollback restores */
+    f = fopen(tmp, "wb");
+    assert(f);
+    elf[7] = 0x42;
+    assert(fwrite(elf, 1, sizeof elf, f) == sizeof elf);
+    fclose(f);
+    assert(health_stage_activate(live) == 0);
+    f = fopen(bak, "rb");
+    assert(f); fclose(f);
+    assert(health_verify_or_rollback(live) == 0);
+    /* corrupt live + backup present -> rollback */
+    f = fopen(live, "wb");
+    assert(f); assert(fwrite("XX", 1, 2, f) == 2); fclose(f);
+    assert(health_verify_or_rollback(live) == 1);
+    f = fopen(live, "rb");
+    assert(f);
+    assert(fread(chk, 1, 4, f) == 4);
+    fclose(f);
+    assert(chk[0] == 0x7f);
+}
+
+static void test_manifest(void) {
+    const char *json = "{\"version\":\"1.0.0\",\"channel\":\"stable\","
+        "\"min_version\":\"0.9.0\",\"platform\":\"ps4-goldhen\","
+        "\"assets\":[{\"name\":\"orbisrpc.bin\","
+        "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}";
+    manifest_t m;
+    assert(manifest_parse(json, strlen(json), &m) == 0);
+    assert(strcmp(m.version, "1.0.0") == 0);
+    assert(strcmp(m.channel, "stable") == 0);
+    char hex[65] = {0};
+    assert(manifest_find(&m, "orbisrpc.bin", hex) == 0);
+    assert(!strcmp(hex, "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"));
+    assert(manifest_find(&m, "nope.bin", hex) != 0);
+    assert(manifest_gate(&m) == 1);
+    assert(manifest_is_newer(&m, "0.9.0") == 1);
+    assert(manifest_is_newer(&m, "1.0.0") == 0);
+    /* wrong channel / platform refused */
+    const char *bad = "{\"version\":\"9.9.9\",\"channel\":\"beta\","
+        "\"platform\":\"ps5\",\"assets\":[{\"name\":\"x.bin\","
+        "\"sha256\":\"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"}]}";
+    manifest_t m2;
+    assert(manifest_parse(bad, strlen(bad), &m2) == 0);
+    assert(manifest_gate(&m2) == 0);
+    /* malformed rejected */
+    assert(manifest_parse("{}", 2, &m) != 0);
+    assert(manifest_parse("not json", 8, &m) != 0);
+    /* hash check: real sha256 of "abc" must match */
+    const char *jh = "{\"version\":\"1\",\"assets\":[{\"name\":\"a\","
+        "\"sha256\":\"ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad\"}]}";
+    manifest_t m3;
+    assert(manifest_parse(jh, strlen(jh), &m3) == 0);
+    assert(manifest_check(&m3, "a", (const unsigned char *)"abc", 3) == 0);
+    assert(manifest_check(&m3, "a", (const unsigned char *)"abd", 3) != 0);
+}
+
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -223,6 +334,9 @@ int main(void) {
     test_nametable();
     test_base64();
     test_art_parse();
+    test_health_safe_mode();
+    test_health_stage_activate();
+    test_manifest();
     puts("utility tests passed");
     return 0;
 }

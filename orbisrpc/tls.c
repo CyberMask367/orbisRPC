@@ -8,9 +8,9 @@
  * mbedTLS sends the standard extension set and gets 101 immediately.
  *
  * The socket stays non-blocking; WANT_READ/WRITE maps to our pump model.
- * No certificate validation: no trust store exists on console. Same
- * posture as before — encryption against passive sniffing, SNI is sent.
- */
+ * Certificate verification is REQUIRED against the curated bundle
+ * (ca_bundle_pem.h); TLS is capped at 1.2 because mbedTLS 3.x routes 1.3
+ * through PSA crypto whose init fails on-console. SNI is sent. */
 #include "tls.h"
 #include "log.h"
 #include "clock.h"
@@ -19,6 +19,8 @@
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/debug.h>
 #include <mbedtls/net_sockets.h> /* error codes only; transport is ours */
+#include <mbedtls/x509_crt.h>
+#include "ca_bundle_pem.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
 #include <errno.h>
@@ -48,29 +50,25 @@ struct tls_ctx {
     mbedtls_ssl_config conf;
     mbedtls_ctr_drbg_context rng;
     mbedtls_entropy_context ent;
+    mbedtls_x509_crt ca;
     int fd;
 };
 
-/* Strong entropy from the OS; weak time fallback so we never hard-fail. */
+/* Strong entropy from the OS ONLY (/dev/urandom). There is deliberately
+ * no weak fallback: inventing cryptographic randomness from time/address
+ * jitter would silently downgrade every TLS session and the DRBG seed.
+ * If strong entropy is unavailable the handshake fails closed here. */
 static int orbis_poll(void *data, unsigned char *out, size_t len, size_t *olen){
     (void)data;
     int fd = open("/dev/urandom", O_RDONLY);
-    if(fd >= 0){
-        size_t got = 0;
-        while(got < len){
-            long r = read(fd, (char *)out + got, len - got);
-            if(r <= 0) break;
-            got += (size_t)r;
-        }
-        close(fd);
-        if(got == len){ *olen = len; return 0; }
+    if(fd < 0) return -1;
+    size_t got = 0;
+    while(got < len){
+        long r = read(fd, (char *)out + got, len - got);
+        if(r <= 0){ close(fd); return -1; }
+        got += (size_t)r;
     }
-    /* fallback: time + address jitter (weak, but keeps us functional).
-     * Local xorshift on purpose: rand()/srand() would mutate process-global
-     * RNG state inside the host game. */
-    uint32_t x = (uint32_t)(time(NULL) ^ (uintptr_t)out ^ (uintptr_t)&x);
-    if(!x) x = 0x9e3779b9u;
-    for(size_t i = 0; i < len; i++){ x ^= x<<13; x ^= x>>17; x ^= x<<5; out[i] = (unsigned char)x; }
+    close(fd);
     *olen = len;
     return 0;
 }
@@ -115,6 +113,7 @@ tls_ctx_t *tls_start(int fd, const char *host){
 
     mbedtls_ssl_init(&t->ssl);
     mbedtls_ssl_config_init(&t->conf);
+    mbedtls_x509_crt_init(&t->ca);
     mbedtls_ctr_drbg_init(&t->rng);
     mbedtls_entropy_init(&t->ent);
     mbedtls_entropy_add_source(&t->ent, orbis_poll, NULL, 64,
@@ -130,8 +129,16 @@ tls_ctx_t *tls_start(int fd, const char *host){
         log_msg("tls: config fail %d", rc);
         goto fail;
     }
-    /* No trust store on console: parse the chain, skip validation. */
-    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_NONE);
+    /* Curated trust anchors: chain verification is REQUIRED. A handshake
+     * that does not verify against the bundle fails closed (no MITM). */
+    if((rc = mbedtls_x509_crt_parse(&t->ca,
+                (const unsigned char *)ORBISRPC_CA_BUNDLE_PEM,
+                sizeof ORBISRPC_CA_BUNDLE_PEM)) < 0){
+        log_msg("tls: CA bundle parse fail %d", rc);
+        goto fail;
+    }
+    mbedtls_ssl_conf_ca_chain(&t->conf, &t->ca, NULL);
+    mbedtls_ssl_conf_authmode(&t->conf, MBEDTLS_SSL_VERIFY_REQUIRED);
     mbedtls_ssl_conf_rng(&t->conf, mbedtls_ctr_drbg_random, &t->rng);
     /* TLS 1.2 ceiling (ported from 1.0, proven on hardware): mbedTLS 3.x
      * routes TLS 1.3 through the PSA crypto subsystem, whose init fails
@@ -174,11 +181,19 @@ tls_ctx_t *tls_start(int fd, const char *host){
         }
     }
     log_msg("tls: established (%s)", mbedtls_ssl_get_version(&t->ssl));
+    {
+        uint32_t vf = mbedtls_ssl_get_verify_result(&t->ssl);
+        if(vf != 0){
+            log_msg("tls: cert verify fail flags=0x%08x", vf);
+            goto fail;
+        }
+    }
     return t;
 
 fail:
     mbedtls_ssl_free(&t->ssl);
     mbedtls_ssl_config_free(&t->conf);
+    mbedtls_x509_crt_free(&t->ca);
     mbedtls_ctr_drbg_free(&t->rng);
     mbedtls_entropy_free(&t->ent);
     free(t);
@@ -218,6 +233,7 @@ void tls_free(tls_ctx_t *t){
     mbedtls_ssl_close_notify(&t->ssl);
     mbedtls_ssl_free(&t->ssl);
     mbedtls_ssl_config_free(&t->conf);
+    mbedtls_x509_crt_free(&t->ca);
     mbedtls_ctr_drbg_free(&t->rng);
     mbedtls_entropy_free(&t->ent);
     free(t);

@@ -5,6 +5,7 @@
 #include "clock.h"
 #include "tmdb_crypto.h"
 #include "log.h"
+#include "art_table.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -192,6 +193,20 @@ static int http_get(const char *host, const char *path,
 static struct { char id[16]; char name[128]; char icon[256]; } s_cache[TMDB_CACHE_N];
 static int s_cache_n = 0;
 
+/* Build-time table lookup (Sony CDN data, no network). */
+static int art_table_lookup(const char *tid,
+                            const char **out_name, const char **out_icon){
+    if(!tid || !out_name || !out_icon) return -1;
+    for(size_t i = 0; i < ORBISRPC_ART_TABLE_N; i++){
+        if(!strcmp(ORBISRPC_ART_TABLE[i].id, tid)){
+            *out_name = ORBISRPC_ART_TABLE[i].name;
+            *out_icon = ORBISRPC_ART_TABLE[i].icon;
+            return 0;
+        }
+    }
+    return -1;
+}
+
 int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
                  char *icon, size_t icon_cap){
     if(!titleId || !name || name_cap == 0) return -1;
@@ -201,6 +216,23 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
             strncpy(name, s_cache[i].name, name_cap-1); name[name_cap-1] = 0;
             if(icon && icon_cap){ strncpy(icon, s_cache[i].icon, icon_cap-1); icon[icon_cap-1] = 0; }
             return name[0] ? 0 : -1;
+        }
+    }
+    /* Build-time Sony table first: same authoritative data, zero network.
+     * (Live TMDB port 80 is unreachable from jailbroken consoles.) */
+    {
+        const char *tname = NULL, *ticon = NULL;
+        if(art_table_lookup(titleId, &tname, &ticon) == 0 && tname){
+            strncpy(name, tname, name_cap-1); name[name_cap-1] = 0;
+            if(icon && icon_cap && ticon){ strncpy(icon, ticon, icon_cap-1); icon[icon_cap-1] = 0; }
+            if(s_cache_n < TMDB_CACHE_N){
+                strncpy(s_cache[s_cache_n].id, titleId, 15);
+                strncpy(s_cache[s_cache_n].name, tname, 127);
+                if(ticon) strncpy(s_cache[s_cache_n].icon, ticon, 255);
+                s_cache_n++;
+            }
+            log_msg("name: %s via art-table", name);
+            return 0;
         }
     }
     char path[128];

@@ -75,15 +75,29 @@ int time_sync(void){
     static const char *hosts[] = {
         "time.google.com", "pool.ntp.org", "time.cloudflare.com", NULL
     };
-    for(int i = 0; hosts[i]; i++){
-        if(sntp_once(hosts[i]) == 0){
-            log_msg("time sync ok via %s (offset %+llds)",
-                    hosts[i], (long long)s_offset);
-            return 0;
-        }
+    /* One host per call, rotating: a full 3-host sweep can stall ~20s+,
+     * which must never sit inside the 1s gateway loop (heartbeat
+     * starvation). Boot sweeps via time_sync_all(); hourly ticks call
+     * this (single ~6s-bounded attempt). */
+    static int next_host = 0;
+    const char *h = hosts[next_host];
+    next_host = (next_host + 1) % 3;
+    if(sntp_once(h) == 0){
+        log_msg("time sync ok via %s (offset %+llds)",
+                h, (long long)s_offset);
+        return 0;
     }
-    log_msg("time sync failed; using local clock (offset %+llds)",
-            (long long)s_offset);
+    log_msg("time sync via %s failed; using local clock (offset %+llds)",
+            h, (long long)s_offset);
+    return -1;
+}
+
+/* Boot sweep: try all hosts (bounded, once per boot, before first
+ * connect — never in the live loop). */
+int time_sync_all(void){
+    for(int i = 0; i < 3; i++){
+        if(time_sync() == 0) return 0;
+    }
     return -1;
 }
 

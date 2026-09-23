@@ -337,7 +337,11 @@ int discord_tick(discord_t *d){
         char hb[64];
         if(d->seq>0) snprintf(hb,sizeof hb,"{\"op\":1,\"d\":%d}",d->seq);
         else         snprintf(hb,sizeof hb,"{\"op\":1,\"d\":null}");
-        ws_send_text(&d->ws,hb,strlen(hb));
+        if(ws_send_text(&d->ws,hb,strlen(hb)) < 0){
+            log_msg("heartbeat send failed; reconnecting");
+            d->connected=0;
+            return -1;
+        }
         d->last_heartbeat=now; d->sent_hb=1;
     }
     /* drain pending server frames (non-blocking); 2048 covers the dispatch

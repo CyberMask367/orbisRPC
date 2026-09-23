@@ -1,8 +1,7 @@
 /* tls.h - self-contained TLS client (mbedTLS, statically linked).
  * No PS4 TLS-module dependency: works in payload and plugin processes.
- * The validator parses the chain but does not validate it (no trust
- * store on console), so this protects against passive sniffing,
- * not active man-in-the-middle attacks. */
+ * Certificate verification is REQUIRED against the curated bundle;
+ * see ca_bundle_pem.h. */
 #ifndef TLS_H
 #define TLS_H
 #include <stddef.h>

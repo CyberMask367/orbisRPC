@@ -17,6 +17,7 @@
 #include "clock.h"
 #include "lock.h"
 #include "timesync.h"
+#include "health.h"
 #include "log.h"
 #include "ws.h"
 #include "discord.h"
@@ -84,6 +85,27 @@ int daemon_run(const char *fixed_game_name){
         if(lr == 1){ log_msg("another daemon holds the lock; standing down"); log_close(); return 0; }
         if(lr != 0) log_msg("WARN: lock error; continuing without guard");
     }
+    /* Crash recovery: unclean-boot marker + consecutive-failure counter.
+     * Only boots that die before going healthy count; normal reboots and
+     * token-less idles never trip safe mode. */
+    int safe_mode = health_boot_note_crash();
+    if(safe_mode)
+        log_msg("WARN: repeated unclean boots; safe mode (updates off)");
+    /* Boot watchdog: a staged update that never proved itself healthy
+     * gets rolled back to .bak before anything runs it. */
+    {
+        static const char *targets[] = {
+            "/data/GoldHEN/payloads/orbisrpc.bin",
+            "/data/GoldHEN/plugins/orbisrpc_plugin.prx",
+        };
+        for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++){
+            int vr = health_verify_or_rollback(targets[ti]);
+            if(vr == 1)
+                log_msg("WARN: %s rolled back to last-good backup", targets[ti]);
+            else if(vr == -1)
+                log_msg("WARN: %s failed verification (no backup)", targets[ti]);
+        }
+    }
     if(cfg_load(CFG_PATH, &g_cfg) != 0){
         /* First boot: drop a template so FTP edit is the only step */
         FILE *probe = fopen(CFG_PATH, "rb");
@@ -94,13 +116,17 @@ int daemon_run(const char *fixed_game_name){
         } else fclose(probe);
         log_msg("config load failed; running on defaults until valid config appears");
     }
-    if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); log_close(); return 0; }
+    if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); health_mark_clean(); log_close(); return 0; }
     log_set_debug(g_cfg.debug);
     if(g_cfg.debug) log_dbg("debug logging on (config)");
     /* Wall-clock correction for Discord timestamps (PSN time sync is
-     * typically blocked on jailbroken consoles). Non-fatal. */
-    time_sync();
+     * typically blocked on jailbroken consoles). Boot sweep is bounded;
+     * hourly ticks are single-host attempts (never stall heartbeats). */
+    time_sync_all();
     if(!have_token(&g_cfg)){
+        /* Waiting for configuration is a HEALTHY boot, not a crash:
+         * mark clean so token-less boots never trip safe mode. */
+        health_mark_healthy();
         log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
         log_close();
         return 1;
@@ -108,15 +134,18 @@ int daemon_run(const char *fixed_game_name){
 
     /* Self-update once per boot, before first connect. Never fatal:
      * staged artifacts take effect on next launch/injection. */
-    if(g_cfg.auto_update){
+    if(g_cfg.auto_update && !safe_mode){
         int ur = updater_check_and_stage();
         log_msg("updater: %s (local %s)",
                 ur > 0 ? "staged newer build" : ur == 0 ? "already current" : "check failed",
                 ORBISRPC_VERSION);
+    } else if(safe_mode){
+        log_msg("updater: skipped (safe mode)");
     }
 
     discord_t dc;
     int base_poll = g_cfg.poll_interval_s;
+    int64_t boot_mono = orbis_mono_s();
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
     int backoff = base_poll;
@@ -143,6 +172,7 @@ int daemon_run(const char *fixed_game_name){
         if(rc == -2){
             log_msg("FATAL: token rejected by gateway (close 4004). "
                     "Fix \"token\" in %s", CFG_PATH);
+            health_mark_clean();
             return 2;
         }
         if(rc != 0){
@@ -175,6 +205,7 @@ int daemon_run(const char *fixed_game_name){
         int64_t last_poll = 0;
         int64_t last_alive = 0;
         static int home_posted = 0;
+        static int healthy_marked = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
@@ -193,6 +224,14 @@ int daemon_run(const char *fixed_game_name){
                 if(now - last_alive >= 60){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
+                }
+                /* A boot that survives HEALTH_STABLE_SECS of runtime was
+                 * healthy: clear the unclean-boot marker so only real
+                 * crashes count toward safe mode. */
+                if(!healthy_marked && now - boot_mono >= HEALTH_STABLE_SECS){
+                    healthy_marked = 1;
+                    health_mark_healthy();
+                    log_msg("health: boot marked healthy");
                 }
                 char name[128] = "";
                 if(fixed_game_name){
@@ -276,11 +315,18 @@ int daemon_run(const char *fixed_game_name){
             if(tr == -2){
                 log_msg("FATAL: token rejected (close 4004). Fix %s", CFG_PATH);
                 ws_close(&dc.ws);
+                health_mark_clean();
                 log_close();
                 return 2;
             }
-            if(tr == -3){ log_msg("invalid session; fresh identify"); backoff = base_poll; ws_close(&dc.ws); break; }
-            if(tr != 0){ log_msg("gateway dropped; reconnecting"); break; }
+            if(tr == -3){ log_msg("invalid session; fresh identify"); ws_close(&dc.ws); sleep_stop(backoff); break; }
+            if(tr != 0){
+                log_msg("gateway dropped; reconnecting");
+                ws_close(&dc.ws);
+                backoff *= 2; if(backoff > 300) backoff = 300;
+                sleep_stop(backoff);
+                break;
+            }
 
             for(int i = 0; i < 10 && !s_stop; i++) usleep(100000);
         }

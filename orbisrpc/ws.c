@@ -67,6 +67,22 @@ static int ws_send_all(ws_t *w, const unsigned char *data, size_t n){
 }
 
 static void next_mask(unsigned char mk[4]){
+    /* RFC 6455 masking key: fresh bytes from /dev/urandom (the same strong
+     * source as TLS). The LCG below is a last-resort fallback for a
+     * console with no urandom at all; masking is obfuscation, not secrecy,
+     * but there is no reason to use a predictable key when OS randomness
+     * exists. */
+    int fd = open("/dev/urandom", O_RDONLY);
+    if(fd >= 0){
+        size_t got = 0;
+        while(got < 4){
+            long r = read(fd, (char *)mk + got, 4 - got);
+            if(r <= 0) break;
+            got += (size_t)r;
+        }
+        close(fd);
+        if(got == 4) return;
+    }
     static uint32_t mk_seed;
     if(!mk_seed) mk_seed = (uint32_t)orbis_mono_s() ^ 0x9e3779b9u ^ (uint32_t)(uintptr_t)&mk_seed;
     mk_seed = mk_seed*1664525u + 1013904223u;
@@ -230,6 +246,7 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
             if(orbis_mono_s()-t0 > 10){ log_msg("hs timeout (got %dB)", hlen); goto fail; }
             usleep(20000); continue;
         }
+        log_msg("hs read fail (got %dB)", hlen);
         goto fail;
     }
     if(header_end < 0 || hlen < 12 || strncmp(hdr,"HTTP/1.1 101 ",12)!=0){ log_msg("no 101: %.40s", hdr); goto fail; }
@@ -384,6 +401,7 @@ int ws_recv_frame(ws_t *w, char *buf, size_t cap, int *opcode_out, int *fin_out)
                 }
             }
             if(w->rlen == w->rcap){ /* full with no parseable frame: give up cleanly */
+                log_msg("ws: buffer full with no frame; dropping %zuB and reconnecting", w->rlen);
                 w->rpos=0; w->rlen=0; return -2;
             }
         }

@@ -12,6 +12,9 @@
 /* Try an SNTP exchange; on success stores offset and returns 0. -1 = keep
  * old offset (first boot without sync behaves like before). */
 int time_sync(void);
+/* Boot sweep: try all hosts (bounded, once per boot, before first
+ * connect — never in the live loop). */
+int time_sync_all(void);
 /* Corrected wall clock for Discord epoch stamps. */
 int64_t time_fixed(void);
 #endif
