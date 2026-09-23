@@ -16,6 +16,7 @@
 #include "cfg.h"
 #include "clock.h"
 #include "lock.h"
+#include "timesync.h"
 #include "log.h"
 #include "ws.h"
 #include "discord.h"
@@ -96,6 +97,9 @@ int daemon_run(const char *fixed_game_name){
     if(!g_cfg.enabled){ log_msg("disabled in config; exiting"); log_close(); return 0; }
     log_set_debug(g_cfg.debug);
     if(g_cfg.debug) log_dbg("debug logging on (config)");
+    /* Wall-clock correction for Discord timestamps (PSN time sync is
+     * typically blocked on jailbroken consoles). Non-fatal. */
+    time_sync();
     if(!have_token(&g_cfg)){
         log_msg("FATAL: put your Discord user token in %s as \"token\":\"...\"", CFG_PATH);
         log_close();
@@ -158,6 +162,7 @@ int daemon_run(const char *fixed_game_name){
         static char last[128] = "";
         static char sess_tid[16] = "";
         static int64_t started = 0;
+        static int64_t last_tsync = 0;
         /* Resume window: if the same title vanishes briefly (detection
          * flicker, quick menu hop) and returns within 10 minutes, the
          * timer resumes instead of resetting to 0:00. */
@@ -173,6 +178,7 @@ int daemon_run(const char *fixed_game_name){
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
             int64_t now = orbis_mono_s();
+            if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
             if(now != last_poll){
                 last_poll = now;
                 if(now - last_alive >= 60){
@@ -214,7 +220,7 @@ int daemon_run(const char *fixed_game_name){
                             log_msg("SESSION_RESUMED title=%s (gap %llds, timer kept)",
                                     cur_tid[0]?cur_tid:"?", (long long)(now - prev_end));
                         } else {
-                            started = time(NULL);
+                            started = time_fixed();
                         }
                         need_post = 1;
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
