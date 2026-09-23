@@ -194,8 +194,8 @@ static struct { char id[16]; char name[128]; char icon[256]; } s_cache[TMDB_CACH
 static int s_cache_n = 0;
 
 /* Build-time table lookup (Sony CDN data, no network). */
-static int art_table_lookup(const char *tid,
-                            const char **out_name, const char **out_icon){
+static int art_table_find(const char *tid,
+                          const char **out_name, const char **out_icon){
     if(!tid || !out_name || !out_icon) return -1;
     for(size_t i = 0; i < ORBISRPC_ART_TABLE_N; i++){
         if(!strcmp(ORBISRPC_ART_TABLE[i].id, tid)){
@@ -205,6 +205,20 @@ static int art_table_lookup(const char *tid,
         }
     }
     return -1;
+}
+
+int art_table_lookup(const char *titleId, char *name, size_t name_cap,
+                     char *icon, size_t icon_cap){
+    if(!titleId || !name || name_cap == 0) return -1;
+    const char *tname = NULL, *ticon = NULL;
+    if(art_table_find(titleId, &tname, &ticon) != 0 || !tname) return -1;
+    strncpy(name, tname, name_cap - 1);
+    name[name_cap - 1] = 0;
+    if(icon && icon_cap){
+        if(ticon){ strncpy(icon, ticon, icon_cap - 1); icon[icon_cap - 1] = 0; }
+        else icon[0] = 0;
+    }
+    return 0;
 }
 
 int tmdb_resolve(const char *titleId, char *name, size_t name_cap,

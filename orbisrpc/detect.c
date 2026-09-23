@@ -51,6 +51,26 @@ static int is_title_prefix(const char *n);
  * A launched game shows up as an "eboot.bin" process; its identity comes
  * from the freshest savedata dir (gameplay writes saves continuously).
  * Both facts verified live via probes before wiring them in. */
+/* Count eboot.bin processes. Changes in the set mean a launch or a close;
+ * callers use it to drop stale caches immediately instead of waiting. */
+static int proc_eboot_count(void){
+    int mib[4] = { 1, 14, 8, 0 };
+    size_t sz = 0;
+    int n = 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
+    static unsigned char buf[256*1024];
+    if(sz > sizeof buf) return -1;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
+    size_t off = 0;
+    while(off + 4 <= sz){
+        int recsz = *(int *)(buf + off);
+        if(recsz <= 0 || off + (size_t)recsz > sz) break;
+        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+            n++;
+        off += (size_t)recsz;
+    }
+    return n;
+}
 static int proc_has_eboot(void){
     int mib[4] = { 1, 14, 8, 0 };
     size_t sz = 0;
@@ -386,8 +406,25 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(have_tid){
         remember_titleid(titleId);
         s_last_art[0] = 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+        /* Launch/close churns the eboot set; a fresh set means the old
+         * cached identity may belong to a dead game — drop it so the
+         * new title resolves immediately instead of lingering. */
+        {
+            static int last_eboots = -1;
+            int nboots = proc_eboot_count();
+            if(nboots >= 0 && nboots != last_eboots){
+                if(last_eboots >= 0){
+                    s_res_valid = 0;
+                    log_msg("eboot set changed %d -> %d; resolve cache dropped",
+                            last_eboots, nboots);
+                }
+                last_eboots = nboots;
+            }
+        }
+#endif
         if(cached_resolve(titleId, out_name, cap)){
-            log_msg("name: %s via cache", out_name);
+            log_dbg("name: %s via cache", out_name);
             named = 1;
         }
         /* cheap, game-process-safe sources first; Sony TMDB (network)
@@ -422,7 +459,7 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     remember_titleid(titleId);
     s_last_art[0] = 0;
     if(cached_resolve(titleId, out_name, cap)){
-        log_msg("name: %s via cache", out_name);
+        log_dbg("name: %s via cache", out_name);
         return 0;
     }
     /* Game-process-safe only: small reads plus one bounded network

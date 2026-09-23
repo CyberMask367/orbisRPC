@@ -64,6 +64,11 @@ int art_parse_mp(const char *body, size_t len, const char *url,
 static char s_last_url[512] = "";
 static char s_last_mp[512] = "";
 
+void art_cache_clear(void){
+    s_last_url[0] = 0;
+    s_last_mp[0] = 0;
+}
+
 static int art_post(const char *app_id, const char *token, const char *url,
                     char *out_body, size_t body_cap, size_t *out_len){
 #ifdef ORBISRPC_SDK_PAYLOAD

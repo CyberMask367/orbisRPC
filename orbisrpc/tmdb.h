@@ -9,4 +9,8 @@
  * through to the next name source). */
 int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
                  char *icon, size_t icon_cap);
+/* Build-time Sony table lookup (no network): name + icon URL for titleId.
+ * Returns 0 on hit (name always set, icon may be empty), -1 on miss. */
+int art_table_lookup(const char *titleId, char *name, size_t name_cap,
+                     char *icon, size_t icon_cap);
 #endif

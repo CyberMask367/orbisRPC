@@ -25,6 +25,7 @@
 #include "updater.h"
 #include "version.h"
 #include "jsonlite.h"
+#include "art.h"
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -360,6 +361,7 @@ int daemon_run(const char *fixed_game_name){
                         }
                         need_post = 1;
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
+                        art_cache_clear();
                         sess_save(cur_tid, name, started);
                     } else if(strncmp(name,last,sizeof last)!=0){
                         strncpy(last, name, sizeof last-1);

@@ -12,6 +12,9 @@
  * success, 0 when unusable (caller sends no art). Not thread-safe. */
 int art_resolve_mp(const char *app_id, const char *token, const char *url,
                    char *out_mp, size_t cap);
+/* Drop the mp: cache (call on new game sessions: mappings can expire and
+ * each title deserves a fresh resolve anyway). */
+void art_cache_clear(void);
 /* Pure helper (host-tested): extract mp path for url from response. */
 int art_parse_mp(const char *body, size_t len, const char *url,
                  char *out, size_t cap);
