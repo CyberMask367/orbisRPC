@@ -17,11 +17,11 @@ void cfg_defaults(cfg_t *c) {
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
-    /* Default art backend: asset keys resolve against the public
-     * PS4-Rich-Presence-for-Discord application (zorua98741/bshar1865),
-     * which already hosts per-title art under lowercase title IDs.
-     * Dependency, not ours: if it ever goes away, art degrades to
-     * nothing and everything else keeps working. */
+    /* Default art backend: our own Sony-CDN icon pack, resolved through
+     * Discord's external-assets proxy (mp:) at post time. Works from the
+     * start with zero setup; missing titles degrade to no art. */
+    strncpy(c->art_base_url, "https://raw.githubusercontent.com/SirHumza/orbisrpc-host/main/icons/",
+            sizeof(c->art_base_url)-1);
     strncpy(c->application_id, "1536977374795538532", sizeof(c->application_id)-1);
 }
 
