@@ -96,6 +96,11 @@ static long scan_newest_save(char *out, size_t cap){
     long best = -1;
     out[0] = 0;
     const char *best_src = "none";
+    /* Per-title activity = max(savedata writes, app.pkg access time).
+     * app.pkg atime is the sharper signal: the running game streams its
+     * own package continuously, while save mtimes get bulk-touched by
+     * cloud sync (proven: all 28 titles sharing one mtime). atime wins
+     * ties because only gameplay advances it. */
     for(int u = 0; u < ndirs; u++){
         char spath[96];
         snprintf(spath, sizeof spath, "/user/home/%s/savedata", udirs[u]);
@@ -152,6 +157,31 @@ static long scan_newest_save(char *out, size_t cap){
                     strncpy(out, e->d_name, cap-1);
                     out[cap-1] = 0;
                     best_src = "appdir";
+                }
+            }
+            closedir(ad);
+        }
+    }
+    /* Third signal (strongest): app.pkg ACCESS time. The running game
+     * streams its own package, so its atime is the freshest on the box;
+     * cloud sync touches mtimes, never atimes. Verified live: the
+     * foreground title's atime beats every idle title by days. */
+    {
+        DIR *ad = opendir("/user/app");
+        if(ad){
+            struct dirent *e;
+            while((e = readdir(ad))){
+                if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
+                char pp[96];
+                int wn = snprintf(pp, sizeof pp, "/user/app/%s/app.pkg",
+                                  e->d_name);
+                if(wn <= 0 || (size_t)wn >= sizeof pp) continue;
+                struct stat st;
+                if(stat(pp, &st) == 0 && (long)st.st_atime > best){
+                    best = (long)st.st_atime;
+                    strncpy(out, e->d_name, cap-1);
+                    out[cap-1] = 0;
+                    best_src = "pkg-atime";
                 }
             }
             closedir(ad);
