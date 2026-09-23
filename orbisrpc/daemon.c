@@ -168,12 +168,17 @@ int daemon_run(const char *fixed_game_name){
         static char cand_title[16] = "";
         static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
+        int64_t last_alive = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
         while(!s_stop){ /* inner: live session, serviced every second */
             int64_t now = orbis_mono_s();
             if(now != last_poll){
                 last_poll = now;
+                if(now - last_alive >= 60){
+                    last_alive = now;
+                    log_msg("alive: %s", active ? last : "idle");
+                }
                 char name[128] = "";
                 if(fixed_game_name){
                     strncpy(name, fixed_game_name, sizeof name-1);

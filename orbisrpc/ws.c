@@ -113,8 +113,13 @@ int ws_connect(ws_t *w, const char *host, int port, const char *resource, const 
     }
     freeaddrinfo(res);
     {
-        struct timeval tv0 = { .tv_sec = 0, .tv_usec = 0 };
+        /* Both timeouts stay armed for the socket's whole life (plus
+         * NBIO below): a stuck peer can never wedge the daemon silently —
+         * the failure observed on hardware was a frozen process with zero
+         * output and no timeout to break it. */
+        struct timeval tv0 = { .tv_sec = 15, .tv_usec = 0 };
         setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv0, sizeof tv0);
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv0, sizeof tv0);
     }
     {
         int fl = fcntl(fd, F_GETFL, 0);
