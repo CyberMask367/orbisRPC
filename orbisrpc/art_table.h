@@ -25,7 +25,6 @@ static const art_entry_t ORBISRPC_ART_TABLE[] = {
     { "CUSA08992", "DRAGON BALL FighterZ", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA08992_00/2/i_f13f6b1fd57e69ddecc9fe236a32c2ebcbf9464e896d66ad62ed3dfadc6f5054/i/icon0.png" },
     { "CUSA09311", "Assassin's Creed® Odyssey", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA09311_00/2/i_ccb50a2a6659c60886f0d5e731d573e0d2ca2996b9b0d82739941fd86e4a3c30/i/icon0.png" },
     { "CUSA09303", "Assassin's Creed® Odyssey", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA09303_00/3/i_d6b485c473b4b3d739197a5f020aeb7428f69d6c29e0dda514f6db41916dc3b6/i/icon0.png" },
-    { "CUSA11995", "Marvel's Spider-Man", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA11995_00/2/i_a0ac52790db5fabdacd0b4318fd1d9fe9999d731745fe60b4bd229c6d7da5fbc/i/icon0.png" },
     { "CUSA13323", "Ghost of Tsushima", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA13323_00/8/i_79e6fad7f6d7610ec23583faf0f43c6a09057193f811583539f88f632cbe8fd7/i/icon0.png" },
     { "CUSA14909", "SpongeBob SquarePants: Battle For Bikini Bottom - Rehydrated", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA14909_00/4/i_c5bb0ce1278e0c7f13895b383a1e694bf0c1d2b3a4c94bec6af059d05a2da865/i/icon0.png" },
     { "CUSA18795", "Skater XL", "https://gs2-sec.ww.prod.dl.playstation.net/gs2-sec/appkgo/prod/CUSA18795_00/8/i_5aaf5b8c67ce2d70cc245b7a69c74ba38c635b305da25c1bbdb1a933f392fdca/i/icon0.png" },

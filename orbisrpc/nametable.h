@@ -33,7 +33,6 @@ static const nt_entry_t g_nametable[] = {
     { "CUSA06712", "Goat Simulator" },
     { "CUSA08992", "DRAGON BALL FighterZ" },
     { "CUSA09311", "Assassin's Creed Odyssey" },
-    { "CUSA11995", "Marvel's Spider-Man" },
     { "CUSA13323", "Ghost of Tsushima" },
     { "CUSA14909", "SpongeBob SquarePants: Battle For Bikini Bottom" },
     { "CUSA18795", "Skater XL" },
