@@ -6,7 +6,8 @@
  * Returns -1 when no game is active or the arguments are invalid.
  * out_path is optional and receives the per-title cache path when provided. */
 int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap);
-/* Returns 1 if a foreground user app is running, otherwise 0. */
+/* Returns 1 if a foreground user app is running, 0 if definitely none,
+ * -1 if the scan itself failed (unknown: keep previous state). */
 int detect_foreground_active(void);
 /* Resolve a display name for a KNOWN title id (plugin mode). */
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap);

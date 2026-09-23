@@ -317,14 +317,19 @@ int daemon_run(const char *fixed_game_name){
                     log_msg("health: boot marked healthy");
                 }
                 char name[128] = "";
+                int scan_unknown = 0;
                 if(fixed_game_name){
                     strncpy(name, fixed_game_name, sizeof name-1);
                     name[sizeof name-1] = 0;
                 }else{
                     /* detect_current_game already checks foreground-active
-                     * internally; don't double-call it. */
-                    if(detect_current_game(name, sizeof name, NULL, 0) != 0)
+                     * internally; don't double-call it. -2 means the scan
+                     * itself failed: hold position, touch nothing. */
+                    scan_unknown = (detect_current_game(name, sizeof name, NULL, 0) == -2);
+                    if(scan_unknown){
+                        log_dbg("detect scan failed; holding");
                         name[0] = 0;
+                    }
                 }
 
                 if(name[0]){
@@ -376,7 +381,7 @@ int daemon_run(const char *fixed_game_name){
                         active = 1; need_post = 0;
                     }
                     }
-                }else if(active){
+                }else if(active && !scan_unknown){
                     cand_title[0] = 0;
                     cand_hits = 0;
                     if(++miss_hits >= 2){
@@ -390,7 +395,7 @@ int daemon_run(const char *fixed_game_name){
                         last[0]=0; sess_tid[0]=0; active=0; started=0;
                         home_posted = 0;
                     }
-                } else if(!home_posted){
+                } else if(!home_posted && !scan_unknown){
                     /* Home screen support: no game running. Post a timerless
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */

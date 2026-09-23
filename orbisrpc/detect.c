@@ -56,14 +56,14 @@ static int is_title_prefix(const char *n);
 static int proc_has_eboot(void){
     int mib[4] = { 1, 14, 8, 0 };
     size_t sz = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
     static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return 0;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return 0;
+    if(sz > sizeof buf) return -1;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
     size_t off = 0;
     while(off + 4 <= sz){
         int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) break;
+        if(recsz <= 0 || off + (size_t)recsz > sz) return -1;
         if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
             return 1;
         off += (size_t)recsz;
@@ -394,7 +394,14 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(!out_name || cap==0) return -1;
     out_name[0] = 0;
     if(out_path && p_cap) out_path[0] = 0;
-    if(!detect_foreground_active()) return -1;
+    {
+        /* Tri-state foreground: 1 game, 0 none, -1 scan failed (unknown).
+         * Unknown must NOT count as disappearance — it means "keep whatever
+         * we had", never a transition. */
+        int fg = detect_foreground_active();
+        if(fg < 0) return -2;
+        if(!fg) return -1;
+    }
     char titleId[16]=""; int named=0, have_tid=0;
 #ifdef ORBISRPC_SDK_PAYLOAD
     /* Spawned processes see no ShellCoreUtil/UserService and /data/app is

@@ -37,7 +37,10 @@
  * code into the exact failing step. */
 static void tls_mbedtls_dbg(void *ctx, int level,
                              const char *file, int line, const char *str){
-    (void)ctx; (void)level;
+    (void)ctx;
+    /* mbedTLS chat (levels 1-3) only in debug mode: at threshold 3 every
+     * TLS record logs a line, which is pure I/O load in production. */
+    if(level > 0 && !log_is_debug()) return;
     const char *base = strrchr(file, '/');
     base = base ? base + 1 : file;
     size_t n = strlen(str);

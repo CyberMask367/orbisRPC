@@ -17,6 +17,7 @@ static int g_klog = -1;
 static volatile int g_log_lock = 0;
 static volatile int g_debug = 0;
 void log_set_debug(int on){ g_debug = on ? 1 : 0; }
+int log_is_debug(void){ return g_debug; }
 static void log_lock(void){ while(__sync_lock_test_and_set(&g_log_lock, 1)) usleep(1000); }
 static void log_unlock(void){ __sync_lock_release(&g_log_lock); }
 
