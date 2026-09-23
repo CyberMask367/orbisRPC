@@ -1,4 +1,3 @@
-#define _XOPEN_SOURCE 700
 #include "../orbisrpc/jsonlite.h"
 #include "../orbisrpc/b64.h"
 #include "../orbisrpc/sfo.h"
@@ -10,8 +9,19 @@
 #include "../orbisrpc/manifest.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <unistd.h>
+#include <sys/stat.h>
+
+/* Portable temp dir (mkdtemp needs feature macros this toolchain lacks). */
+static int make_tmpdir(char *out, size_t cap){
+    static int seq = 0;
+    snprintf(out, cap, "/tmp/orx_test_%d_%d", (int)getpid(), seq++);
+    if(mkdir(out, 0700) != 0) return -1;
+    return 0;
+}
 
 static void test_json(void) {
     const char input[] = "{\"name\":\"A\\u00e9\",\"items\":[true,2,null]}";
@@ -123,14 +133,14 @@ static void test_tmdb(void) {
     int i;
     /* SHA1("abc") = a9993e364706816aba3e25717850c26c9cd0d4d */
     tmdb_sha1((const unsigned char *)"abc", 3, dig);
-    for(i=0;i<20;i++) sprintf(hex+2*i, "%02x", dig[i]);
+    for(i=0;i<20;i++) snprintf(hex+2*i, 3, "%02x", dig[i]);
     assert(strcmp(hex, "a9993e364706816aba3e25717850c26c9cd0d89d") == 0);
     /* HMAC-SHA1 RFC 2202 case 1 */
     {
         unsigned char key[20];
         memset(key, 0x0b, 20);
         tmdb_hmac_sha1(key, 20, (const unsigned char *)"Hi There", 8, dig);
-        for(i=0;i<20;i++) sprintf(hex+2*i, "%02x", dig[i]);
+        for(i=0;i<20;i++) snprintf(hex+2*i, 3, "%02x", dig[i]);
         assert(strcmp(hex, "b617318655057264e28bc0b6fb378c8ef146be00") == 0);
     }
     /* URL path must match the hash Sony's live service accepts */
@@ -205,8 +215,8 @@ static void test_art_parse(void) {
 
 static void test_health_safe_mode(void) {
     /* Unclean-boot marker semantics: normal reboots never count. */
-    char dir[] = "/tmp/orx_health_XXXXXX";
-    assert(mkdtemp(dir) != NULL);
+    char dir[64];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
     health_set_base(dir);
     health_mark_clean();
     /* clean boot x3: counter stays 0, never safe mode */
@@ -227,8 +237,8 @@ static void test_health_safe_mode(void) {
 
 static void test_health_stage_activate(void) {
     /* Atomic staging: bad .new never touches live; rollback restores. */
-    char dir[] = "/tmp/orx_stage_XXXXXX";
-    assert(mkdtemp(dir) != NULL);
+    char dir[64];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
     health_set_base(dir);
     char live[256], tmp[256], bak[256];
     snprintf(live, sizeof live, "%s/live.bin", dir);

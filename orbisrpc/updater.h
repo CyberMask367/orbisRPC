@@ -7,6 +7,8 @@
 int updater_cmp(const char *a, const char *b);
 /* Validate a downloaded payload: ELF magic, 64-bit, x86-64, sane size. */
 int updater_elf_ok(const unsigned char *buf, size_t n);
+/* Accepts raw ELF (payload .bin) or signed SELF (plugin .prx). */
+int updater_image_ok(const unsigned char *buf, size_t n);
 /* Check latest GitHub release; download + atomically stage newer
  * artifacts the daemon actually runs from. Returns 1 updated,
  * 0 already current, -1 failed/checked-off. Never fatal. */
