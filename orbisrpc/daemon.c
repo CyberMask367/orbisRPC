@@ -111,8 +111,10 @@ int daemon_run(const char *fixed_game_name){
         FILE *probe = fopen(CFG_PATH, "rb");
         if(!probe){
             cfg_defaults(&g_cfg);
-            cfg_save(CFG_PATH, &g_cfg);
-            log_msg("created template %s; edit \"token\" over FTP then reboot", CFG_PATH);
+            if(cfg_save(CFG_PATH, &g_cfg) != 0)
+                log_msg("WARN: template config unwritable; token edits will not persist");
+            else
+                log_msg("created template %s; edit \"token\" then reboot", CFG_PATH);
         } else fclose(probe);
         log_msg("config load failed; running on defaults until valid config appears");
     }

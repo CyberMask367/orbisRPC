@@ -112,8 +112,12 @@ static long scan_newest_save(char *out, size_t cap){
                 struct dirent *f;
                 while((f = readdir(td))){
                     if(f->d_name[0] == '.') continue;
-                    char fp[220];
-                    snprintf(fp, sizeof fp, "%s/%s", tp, f->d_name);
+                    /* d_name can be up to 255 chars; tp already holds up
+                     * to ~150 — skip overlong names instead of overflowing. */
+                    if(strlen(f->d_name) > 64) continue;
+                    char fp[256];
+                    int wn = snprintf(fp, sizeof fp, "%s/%s", tp, f->d_name);
+                    if(wn <= 0 || (size_t)wn >= sizeof fp) continue;
                     struct stat fs;
                     if(stat(fp, &fs) == 0 && fs.st_mtime > tb) tb = fs.st_mtime;
                 }
@@ -240,6 +244,7 @@ static void remember_titleid(const char *ti){
     s_last_titleid[sizeof s_last_titleid - 1] = 0;
 }
 static long scan_one_appdir(const char *base, char *out, size_t cap, long best){
+    if(!base || !out || cap < 2) return best;
     DIR *d = opendir(base);
     if(!d) return best;
     struct dirent *e;

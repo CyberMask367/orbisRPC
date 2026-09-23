@@ -135,24 +135,31 @@ int manifest_verify_sig(const unsigned char *msg, size_t msglen,
                         const unsigned char pubkey[64]){
     if(!msg || !sig || !pubkey) return -1;
     unsigned char hash[32];
-    if(mbedtls_sha256(msg, msglen, hash, 0) != 0) return -1;
+    {
+        mbedtls_sha256_context sc;
+        mbedtls_sha256_init(&sc);
+        int ok = mbedtls_sha256_starts(&sc, 0) == 0 &&
+                 mbedtls_sha256_update(&sc, msg, msglen) == 0 &&
+                 mbedtls_sha256_finish(&sc, hash) == 0;
+        mbedtls_sha256_free(&sc);
+        if(!ok) return -1;
+    }
     mbedtls_ecp_group grp;
     mbedtls_ecp_point Q;
-    mbedtls_mpi r, s, x, y, z;
+    mbedtls_mpi r, s;
     mbedtls_ecp_group_init(&grp);
     mbedtls_ecp_point_init(&Q);
     mbedtls_mpi_init(&r); mbedtls_mpi_init(&s);
-    mbedtls_mpi_init(&x); mbedtls_mpi_init(&y); mbedtls_mpi_init(&z);
     int rc = -1;
+    unsigned char uncompressed[65];
     if(mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) != 0) goto out;
     if(mbedtls_mpi_read_binary(&r, sig, 32) != 0) goto out;
     if(mbedtls_mpi_read_binary(&s, sig + 32, 32) != 0) goto out;
-    if(mbedtls_mpi_read_binary(&x, pubkey, 32) != 0) goto out;
-    if(mbedtls_mpi_read_binary(&y, pubkey + 32, 32) != 0) goto out;
-    if(mbedtls_mpi_lset(&z, 1) != 0) goto out;
-    if(mbedtls_mpi_copy(&Q.private_X, &x) != 0) goto out;
-    if(mbedtls_mpi_copy(&Q.private_Y, &y) != 0) goto out;
-    if(mbedtls_mpi_copy(&Q.private_Z, &z) != 0) goto out;
+    /* Public API only (no struct internals): uncompressed point 0x04||X||Y. */
+    uncompressed[0] = 0x04;
+    memcpy(uncompressed + 1, pubkey, 64);
+    if(mbedtls_ecp_point_read_binary(&grp, &Q, uncompressed,
+                                       sizeof uncompressed) != 0) goto out;
     if(mbedtls_ecp_check_pubkey(&grp, &Q) != 0) goto out;
     if(mbedtls_ecdsa_verify(&grp, hash, sizeof hash, &Q, &r, &s) != 0) goto out;
     rc = 0;
@@ -160,6 +167,5 @@ out:
     mbedtls_ecp_group_free(&grp);
     mbedtls_ecp_point_free(&Q);
     mbedtls_mpi_free(&r); mbedtls_mpi_free(&s);
-    mbedtls_mpi_free(&x); mbedtls_mpi_free(&y); mbedtls_mpi_free(&z);
     return rc;
 }

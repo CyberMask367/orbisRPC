@@ -12,6 +12,7 @@ cfg_t g_cfg;
 void cfg_defaults(cfg_t *c) {
     if(!c) return;
     memset(c, 0, sizeof(*c));
+    c->schema_version = CFG_SCHEMA_VERSION;
     c->enabled = 1;
     c->auto_update = 1;
     c->poll_interval_s = 12;
@@ -65,15 +66,20 @@ int cfg_load(const char *path, cfg_t *c) {
     o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   c->auto_update = (int)o->num;
     o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   c->debug = (int)o->num;
     o = jl_obj_get(root, "poll_interval_s"); if (o && o->type == JL_NUMBER) c->poll_interval_s = (int)o->num;
+    o = jl_obj_get(root, "schema_version");  if (o && o->type == JL_NUMBER) c->schema_version = (int)o->num;
     jl_free(root);
     clamp_cfg(c);
+    /* Migration: stamp current schema so re-saves converge.
+     * v0 (no key): identical layout, adopt as-is. */
+    c->schema_version = CFG_SCHEMA_VERSION;
     return 0;
 }
 
-void cfg_save(const char *path, const cfg_t *c) {
-    if(!path || !c) return;
+int cfg_save(const char *path, const cfg_t *c) {
+    if(!path || !c) return -1;
     jl_val_t *r = jl_new_object();
-    if(!r) { log_msg("cfg_save: allocation failed"); return; }
+    if(!r) { log_msg("cfg_save: allocation failed"); return -1; }
+    jl_obj_set(r, "schema_version",  jl_new_number((double)CFG_SCHEMA_VERSION));
     jl_obj_set(r, "token",           jl_new_string(c->token));
     jl_obj_set(r, "application_id",  jl_new_string(c->application_id));
     jl_obj_set(r, "art_base_url",    jl_new_string(c->art_base_url));
@@ -83,13 +89,14 @@ void cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "poll_interval_s", jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
     char *s = jl_stringify(r);
-    if(!s){ log_msg("cfg_save: serialization failed"); jl_free(r); return; }
+    if(!s){ log_msg("cfg_save: serialization failed"); jl_free(r); return -1; }
     /* write tmp + fsync + rename so a power loss can't corrupt the config */
     char tmp[160];
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = fopen(tmp, "wb");
+    int ok = 0;
     if (f) {
-        int ok = (fputs(s, f) >= 0);
+        ok = (fputs(s, f) >= 0);
         if(fflush(f) != 0) ok = 0;
         /* force bytes to disk before rename */
         if(ok) { int fd = fileno(f); if(fd >= 0 && fsync(fd) != 0) ok = 0; }

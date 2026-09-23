@@ -7,6 +7,11 @@
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
 #include "../orbisrpc/manifest.h"
+#include <mbedtls/ecdsa.h>
+#include <mbedtls/ecp.h>
+#include <mbedtls/ctr_drbg.h>
+#include <mbedtls/entropy.h>
+#include <mbedtls/sha256.h>
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -321,6 +326,64 @@ static void test_manifest(void) {
     assert(manifest_check(&m3, "a", (const unsigned char *)"abd", 3) != 0);
 }
 
+static void test_manifest_sig(void) {
+    /* Full round trip with a fresh keypair: sign via mbedTLS, verify via
+     * our public-API-only manifest_verify_sig. Tampered bytes must fail.
+     * Uses only public 3.x APIs (raw group + MPIs, no context internals). */
+    static const unsigned char msg[] = "{\"version\":\"9.9.9\"}";
+    mbedtls_entropy_context ent;
+    mbedtls_entropy_init(&ent);
+    mbedtls_ctr_drbg_context rng;
+    mbedtls_ctr_drbg_init(&rng);
+    assert(mbedtls_ctr_drbg_seed(&rng, mbedtls_entropy_func, &ent,
+                                  (const unsigned char *)"test", 4) == 0);
+    mbedtls_ecp_group grp;
+    mbedtls_ecp_group_init(&grp);
+    assert(mbedtls_ecp_group_load(&grp, MBEDTLS_ECP_DP_SECP256R1) == 0);
+    mbedtls_mpi d, r, s;
+    mbedtls_mpi_init(&d); mbedtls_mpi_init(&r); mbedtls_mpi_init(&s);
+    mbedtls_ecp_point Q;
+    mbedtls_ecp_point_init(&Q);
+    assert(mbedtls_ecp_gen_keypair(&grp, &d, &Q,
+                                    mbedtls_ctr_drbg_random, &rng) == 0);
+    unsigned char hash[32], sig[64], rawpub[64];
+    {
+        mbedtls_sha256_context sc;
+        mbedtls_sha256_init(&sc);
+        assert(mbedtls_sha256_starts(&sc, 0) == 0);
+        assert(mbedtls_sha256_update(&sc, msg, sizeof msg - 1) == 0);
+        assert(mbedtls_sha256_finish(&sc, hash) == 0);
+        mbedtls_sha256_free(&sc);
+    }
+    assert(mbedtls_ecdsa_sign(&grp, &r, &s, &d, hash, sizeof hash,
+                               mbedtls_ctr_drbg_random, &rng) == 0);
+    assert(mbedtls_mpi_write_binary(&r, sig, 32) == 0);
+    assert(mbedtls_mpi_write_binary(&s, sig + 32, 32) == 0);
+    /* export X||Y via the public point-write API */
+    {
+        unsigned char uncomp[65];
+        size_t olen = 0;
+        assert(mbedtls_ecp_point_write_binary(&grp, &Q,
+               MBEDTLS_ECP_PF_UNCOMPRESSED, &olen, uncomp, sizeof uncomp) == 0);
+        assert(olen == 65 && uncomp[0] == 0x04);
+        memcpy(rawpub, uncomp + 1, 64);
+    }
+    assert(manifest_verify_sig(msg, sizeof msg - 1, sig, rawpub) == 0);
+    sig[10] ^= 0x01;
+    assert(manifest_verify_sig(msg, sizeof msg - 1, sig, rawpub) != 0);
+    sig[10] ^= 0x01;
+    unsigned char bad[sizeof msg];
+    memcpy(bad, msg, sizeof bad);
+    bad[5] ^= 0x01;
+    assert(manifest_verify_sig(bad, sizeof bad - 1, sig, rawpub) != 0);
+    assert(manifest_verify_sig(NULL, 0, sig, rawpub) != 0);
+    mbedtls_mpi_free(&d); mbedtls_mpi_free(&r); mbedtls_mpi_free(&s);
+    mbedtls_ecp_point_free(&Q);
+    mbedtls_ecp_group_free(&grp);
+    mbedtls_ctr_drbg_free(&rng);
+    mbedtls_entropy_free(&ent);
+}
+
 static void test_base64(void) {
     char out[32];
     assert(b64_encode((const unsigned char *)"", 0, out) == 0);
@@ -347,6 +410,7 @@ int main(void) {
     test_health_safe_mode();
     test_health_stage_activate();
     test_manifest();
+    test_manifest_sig();
     puts("utility tests passed");
     return 0;
 }
