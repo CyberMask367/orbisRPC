@@ -235,14 +235,14 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
     /* Build-time Sony table first: same authoritative data, zero network.
      * (Live TMDB port 80 is unreachable from jailbroken consoles.) */
     {
-        const char *tname = NULL, *ticon = NULL;
-        if(art_table_lookup(titleId, &tname, &ticon) == 0 && tname){
+        char tname[128] = "", ticon[256] = "";
+        if(art_table_lookup(titleId, tname, sizeof tname, ticon, sizeof ticon) == 0 && tname[0]){
             strncpy(name, tname, name_cap-1); name[name_cap-1] = 0;
-            if(icon && icon_cap && ticon){ strncpy(icon, ticon, icon_cap-1); icon[icon_cap-1] = 0; }
+            if(icon && icon_cap){ strncpy(icon, ticon, icon_cap-1); icon[icon_cap-1] = 0; }
             if(s_cache_n < TMDB_CACHE_N){
                 strncpy(s_cache[s_cache_n].id, titleId, 15);
                 strncpy(s_cache[s_cache_n].name, tname, 127);
-                if(ticon) strncpy(s_cache[s_cache_n].icon, ticon, 255);
+                strncpy(s_cache[s_cache_n].icon, ticon, 255);
                 s_cache_n++;
             }
             log_msg("name: %s via art-table", name);

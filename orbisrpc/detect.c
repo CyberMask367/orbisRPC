@@ -53,24 +53,6 @@ static int is_title_prefix(const char *n);
  * Both facts verified live via probes before wiring them in. */
 /* Count eboot.bin processes. Changes in the set mean a launch or a close;
  * callers use it to drop stale caches immediately instead of waiting. */
-static int proc_eboot_count(void){
-    int mib[4] = { 1, 14, 8, 0 };
-    size_t sz = 0;
-    int n = 0;
-    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
-    static unsigned char buf[256*1024];
-    if(sz > sizeof buf) return -1;
-    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
-    size_t off = 0;
-    while(off + 4 <= sz){
-        int recsz = *(int *)(buf + off);
-        if(recsz <= 0 || off + (size_t)recsz > sz) break;
-        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
-            n++;
-        off += (size_t)recsz;
-    }
-    return n;
-}
 static int proc_has_eboot(void){
     int mib[4] = { 1, 14, 8, 0 };
     size_t sz = 0;
@@ -113,6 +95,7 @@ static long scan_newest_save(char *out, size_t cap){
     }
     long best = -1;
     out[0] = 0;
+    const char *best_src = "none";
     for(int u = 0; u < ndirs; u++){
         char spath[96];
         snprintf(spath, sizeof spath, "/user/home/%s/savedata", udirs[u]);
@@ -147,10 +130,34 @@ static long scan_newest_save(char *out, size_t cap){
                 struct stat ds;
                 if(stat(tp, &ds) == 0) tb = ds.st_mtime;
             }
-            if(tb > best){ best = tb; strncpy(out, e->d_name, cap-1); out[cap-1] = 0; }
+            if(tb > best){ best = tb; strncpy(out, e->d_name, cap-1); out[cap-1] = 0; best_src = "save"; }
         }
         closedir(sd);
     }
+    /* Second signal: /user/app/<TITLE> dir mtime. Launches touch the app
+     * dir even when the game hasn't saved yet (the exact hole that showed
+     * a stale title for a freshly launched game), and it covers titles
+     * with no savedata at all. */
+    {
+        DIR *ad = opendir("/user/app");
+        if(ad){
+            struct dirent *e;
+            while((e = readdir(ad))){
+                if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
+                char ap[64];
+                snprintf(ap, sizeof ap, "/user/app/%s", e->d_name);
+                struct stat st;
+                if(stat(ap, &st) == 0 && st.st_mtime > best){
+                    best = st.st_mtime;
+                    strncpy(out, e->d_name, cap-1);
+                    out[cap-1] = 0;
+                    best_src = "appdir";
+                }
+            }
+            closedir(ad);
+        }
+    }
+    if(out[0]) log_dbg("title scan: %s via %s", out, best_src);
     return out[0] ? 0 : -1;
 }
 #endif
@@ -232,10 +239,31 @@ static int is_title_prefix(const char *n){
  * detect_current_game / detect_name_for_title. */
 static char s_last_titleid[16] = "";
 static char s_last_art[256] = "";
-static char s_res_titleid[16] = "";
-static char s_res_name[128] = "";
-static char s_res_art[256] = "";
-static int s_res_valid = 0;
+/* Last resolved title: same title in a row reuses its name/art with zero
+ * I/O. Any title change resolves fresh — no cross-title cache exists, so
+ * stale identities are impossible by construction. */
+static char s_rs_tid[16] = "";
+static char s_rs_name[128] = "";
+static char s_rs_art[256] = "";
+static int resolve_reuse(const char *ti, char *out_name, size_t cap){
+    if(!ti || !ti[0] || strcmp(ti, s_rs_tid) != 0 || !s_rs_name[0]) return 0;
+    strncpy(out_name, s_rs_name, cap - 1);
+    out_name[cap - 1] = 0;
+    strncpy(s_last_art, s_rs_art, sizeof s_last_art - 1);
+    s_last_art[sizeof s_last_art - 1] = 0;
+    return 1;
+}
+static void resolve_remember(const char *ti, const char *name, const char *art){
+    if(!ti || !name) return;
+    strncpy(s_rs_tid, ti, sizeof s_rs_tid - 1);
+    s_rs_tid[sizeof s_rs_tid - 1] = 0;
+    strncpy(s_rs_name, name, sizeof s_rs_name - 1);
+    s_rs_name[sizeof s_rs_name - 1] = 0;
+    if(art){
+        strncpy(s_rs_art, art, sizeof s_rs_art - 1);
+        s_rs_art[sizeof s_rs_art - 1] = 0;
+    } else s_rs_art[0] = 0;
+}
 /* Media apps post Watching/Listening instead of Playing. IDs verified
  * against Sony TMDB (names resolve there too). */
 int detect_media_type(const char *title_id){
@@ -252,26 +280,6 @@ int detect_media_type(const char *title_id){
 
 const char *detect_last_titleid(void){ return s_last_titleid[0] ? s_last_titleid : NULL; }
 const char *detect_last_art(void){ return s_last_art[0] ? s_last_art : NULL; }
-static void remember_resolved(const char *ti, const char *name, const char *art){
-    if(!ti || !name) return;
-    strncpy(s_res_titleid, ti, sizeof s_res_titleid - 1);
-    s_res_titleid[sizeof s_res_titleid - 1] = 0;
-    strncpy(s_res_name, name, sizeof s_res_name - 1);
-    s_res_name[sizeof s_res_name - 1] = 0;
-    if(art){
-        strncpy(s_res_art, art, sizeof s_res_art - 1);
-        s_res_art[sizeof s_res_art - 1] = 0;
-    } else s_res_art[0] = 0;
-    s_res_valid = 1;
-}
-static int cached_resolve(const char *ti, char *out_name, size_t cap){
-    if(!s_res_valid || !ti || !ti[0] || strcmp(ti, s_res_titleid) != 0) return 0;
-    strncpy(out_name, s_res_name, cap - 1);
-    out_name[cap - 1] = 0;
-    strncpy(s_last_art, s_res_art, sizeof s_last_art - 1);
-    s_last_art[sizeof s_last_art - 1] = 0;
-    return 1;
-}
 static void remember_titleid(const char *ti){
     if(!ti) return;
     strncpy(s_last_titleid, ti, sizeof s_last_titleid - 1);
@@ -406,24 +414,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
     if(have_tid){
         remember_titleid(titleId);
         s_last_art[0] = 0;
-#ifdef ORBISRPC_SDK_PAYLOAD
-        /* Launch/close churns the eboot set; a fresh set means the old
-         * cached identity may belong to a dead game — drop it so the
-         * new title resolves immediately instead of lingering. */
-        {
-            static int last_eboots = -1;
-            int nboots = proc_eboot_count();
-            if(nboots >= 0 && nboots != last_eboots){
-                if(last_eboots >= 0){
-                    s_res_valid = 0;
-                    log_msg("eboot set changed %d -> %d; resolve cache dropped",
-                            last_eboots, nboots);
-                }
-                last_eboots = nboots;
-            }
-        }
-#endif
-        if(cached_resolve(titleId, out_name, cap)){
+        if(resolve_reuse(titleId, out_name, cap)){
             log_dbg("name: %s via cache", out_name);
             named = 1;
         }
@@ -441,7 +432,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
             } else s_last_art[0] = 0;
         }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
-        remember_resolved(titleId, out_name, s_last_art);
+        resolve_remember(titleId, out_name, s_last_art);
     }else{
         remember_titleid("");
         s_last_art[0] = 0;
@@ -458,27 +449,27 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     if(!titleId || !titleId[0] || !out_name || cap==0) return -1;
     remember_titleid(titleId);
     s_last_art[0] = 0;
-    if(cached_resolve(titleId, out_name, cap)){
+    if(resolve_reuse(titleId, out_name, cap)){
         log_dbg("name: %s via cache", out_name);
         return 0;
     }
     /* Game-process-safe only: small reads plus one bounded network
      * lookup; no multi-megabyte scans anywhere in this codebase. */
-    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); remember_resolved(titleId, out_name, ""); return 0; }
+    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, ""); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
-    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); remember_resolved(titleId, out_name, ""); return 0; }
-    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); remember_resolved(titleId, out_name, ""); return 0; }
-    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); remember_resolved(titleId, out_name, ""); return 0; }
+    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, ""); return 0; }
+    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); resolve_remember(titleId, out_name, ""); return 0; }
+    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); resolve_remember(titleId, out_name, ""); return 0; }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
             strncpy(s_last_art, art, sizeof s_last_art-1);
-            remember_resolved(titleId, out_name, art);
+            resolve_remember(titleId, out_name, art);
             return 0; /* tmdb_resolve already logged */
         }
         s_last_art[0] = 0;
     }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
-    remember_resolved(titleId, out_name, "");
+    resolve_remember(titleId, out_name, "");
     return 0;
 }
