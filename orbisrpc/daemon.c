@@ -318,6 +318,25 @@ int daemon_run(const char *fixed_game_name){
                 }
                 char name[128] = "";
                 int scan_unknown = 0;
+#ifdef ORBISRPC_SDK_PAYLOAD
+                /* Launch/close shortcut: the eboot set changing means the
+                 * foreground game changed RIGHT NOW. Reset debounce so the
+                 * switch commits next poll instead of lagging minutes
+                 * behind stale filesystem signals. */
+                {
+                    static int last_eboots = -1;
+                    int nboots = detect_eboot_count();
+                    if(nboots >= 0 && nboots != last_eboots){
+                        if(last_eboots >= 0)
+                            log_msg("eboot set %d -> %d; fast-switching",
+                                    last_eboots, nboots);
+                        last_eboots = nboots;
+                        cand_title[0] = 0;
+                        cand_hits = 0;
+                        miss_hits = 0;
+                    }
+                }
+#endif
                 if(fixed_game_name){
                     strncpy(name, fixed_game_name, sizeof name-1);
                     name[sizeof name-1] = 0;

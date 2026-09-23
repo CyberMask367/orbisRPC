@@ -9,6 +9,11 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
 /* Returns 1 if a foreground user app is running, 0 if definitely none,
  * -1 if the scan itself failed (unknown: keep previous state). */
 int detect_foreground_active(void);
+/* Number of eboot.bin processes (launch/close churn detector). -1 unknown.
+ * Payload-SDK builds only (needs raw sysctl visibility). */
+#ifdef ORBISRPC_SDK_PAYLOAD
+int detect_eboot_count(void);
+#endif
 /* Resolve a display name for a KNOWN title id (plugin mode). */
 int detect_name_for_title(const char *titleId, char *out_name, size_t cap);
 /* Last resolved titleId (e.g. "CUSA00740") or NULL if none yet.

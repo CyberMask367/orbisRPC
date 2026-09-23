@@ -51,8 +51,26 @@ static int is_title_prefix(const char *n);
  * A launched game shows up as an "eboot.bin" process; its identity comes
  * from the freshest savedata dir (gameplay writes saves continuously).
  * Both facts verified live via probes before wiring them in. */
-/* Count eboot.bin processes. Changes in the set mean a launch or a close;
- * callers use it to drop stale caches immediately instead of waiting. */
+/* Count eboot.bin processes. A change means launch/close: callers drop
+ * stale state immediately instead of waiting out debounce windows. */
+int detect_eboot_count(void){
+    int mib[4] = { 1, 14, 8, 0 };
+    size_t sz = 0;
+    int n = 0;
+    if(sysctl(mib, 4, NULL, &sz, NULL, 0) != 0) return -1;
+    static unsigned char buf[256*1024];
+    if(sz > sizeof buf) return -1;
+    if(sysctl(mib, 4, buf, &sz, NULL, 0) != 0) return -1;
+    size_t off = 0;
+    while(off + 4 <= sz){
+        int recsz = *(int *)(buf + off);
+        if(recsz <= 0 || off + (size_t)recsz > sz) break;
+        if(recsz >= 479 && !memcmp(buf + off + 447, "eboot.bin", 10))
+            n++;
+        off += (size_t)recsz;
+    }
+    return n;
+}
 static int proc_has_eboot(void){
     int mib[4] = { 1, 14, 8, 0 };
     size_t sz = 0;
