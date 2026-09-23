@@ -9,6 +9,8 @@ typedef struct jl_val {
     char  *str;     /* string text OR object-entry key */
     size_t strlen;
     double num;
+    int num_is_int;
+    int64_t inum;
     struct jl_val *child;   /* object: first pair ; array: first elem */
     struct jl_val *next;    /* object pair chain OR array elem chain */
     int32_t count;
@@ -23,6 +25,7 @@ jl_val_t *jl_arr_at(const jl_val_t *arr, size_t i);
 char *jl_stringify(const jl_val_t *v);
 jl_val_t *jl_new_string(const char *s);
 jl_val_t *jl_new_number(double n);
+jl_val_t *jl_new_int(int64_t n);
 jl_val_t *jl_new_bool(int b);
 jl_val_t *jl_new_null(void);
 jl_val_t *jl_new_object(void);

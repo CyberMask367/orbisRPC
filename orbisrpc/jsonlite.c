@@ -252,7 +252,7 @@ static int emit(jl_val_t *v, char **out, size_t *cap, size_t *len){
         case JL_NULL: { size_t l=4; if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,"null",4);*len+=4; return 0; }
         case JL_BOOL: { const char*s=v->num?"true":"false"; size_t l=strlen(s);
             if(ensure_capacity(out,cap,*len+l+1)<0)return -1; memcpy(*out+*len,s,l);*len+=l; return 0; }
-        case JL_NUMBER: snprintf(buf,sizeof buf,"%.17g",v->num); break;
+        case JL_NUMBER: if(v->num_is_int) snprintf(buf,sizeof buf,"%lld",(long long)v->inum); else snprintf(buf,sizeof buf,"%.17g",v->num); break;
         case JL_STRING: return escstr(v->str,out,cap,len);
         case JL_ARRAY:{
             size_t l=*len+1; if(ensure_capacity(out,cap,l+1)<0)return -1; (*out)[(*len)++]='[';
@@ -298,7 +298,8 @@ jl_val_t *jl_new_string(const char *s){
     v->strlen=strlen(v->str);
     return v;
 }
-jl_val_t *jl_new_number(double n){ jl_val_t *v=newval(JL_NUMBER); if(v)v->num=n; return v; }
+jl_val_t *jl_new_number(double n){ jl_val_t *v=newval(JL_NUMBER); if(v){v->num=n; v->num_is_int=0;} return v; }
+jl_val_t *jl_new_int(int64_t n){ jl_val_t *v=newval(JL_NUMBER); if(v){v->num=(double)n; v->num_is_int=1; v->inum=n;} return v; }
 jl_val_t *jl_new_bool(int b){ jl_val_t *v=newval(JL_BOOL); if(v)v->num=b?1:0; return v; }
 jl_val_t *jl_new_null(void){ return newval(JL_NULL); }
 jl_val_t *jl_new_object(void){ return newval(JL_OBJECT); }

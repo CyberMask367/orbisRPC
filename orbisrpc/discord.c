@@ -108,7 +108,7 @@ static int rx_frame(discord_t *d, char *buf, size_t cap, int *op, int *fin, int6
 static int send_identify(discord_t *d, const char *token){
     jl_val_t *root=jl_new_object();
     if(!root) return -1;
-    jl_obj_set(root,"op",jl_new_number(2));
+    jl_obj_set(root,"op",jl_new_int(2));
     jl_val_t *dd=jl_new_object();
     if(!dd){ jl_free(root); return -1; }
     jl_obj_set(dd,"token",jl_new_string(token));
@@ -230,13 +230,14 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_val_t *act=jl_new_object();
     if(!act) return -1;
     jl_obj_set(act,"name",jl_new_string(name?name:""));
-    jl_obj_set(act,"type",jl_new_number(0)); /* Playing */
+    jl_obj_set(act,"type",jl_new_int(0)); /* Playing */
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
     if(title_id&&title_id[0]) jl_obj_set(act,"details",jl_new_string(title_id));
     if(started_epoch>0){
         jl_val_t *ts=jl_new_object();
         if(!ts){ jl_free(act); return -1; }
-        jl_obj_set(ts,"start",jl_new_number((double)started_epoch*1000.0)); /* ms epoch */
+        if(started_epoch > 0 && started_epoch < 100000000000LL)
+            jl_obj_set(ts,"start",jl_new_int(started_epoch*1000LL)); /* integer ms epoch */
         jl_obj_set(act,"timestamps",ts);
     }
     if(application_id&&application_id[0])
@@ -274,7 +275,7 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
     if(!root){ jl_free(dd); return -1; }
-    jl_obj_set(root,"op",jl_new_number(3));
+    jl_obj_set(root,"op",jl_new_int(3));
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;
@@ -291,7 +292,7 @@ int discord_clear_presence(discord_t *d){
     jl_obj_set(dd,"afk",jl_new_bool(0));
     jl_val_t *root=jl_new_object();
     if(!root){ jl_free(dd); return -1; }
-    jl_obj_set(root,"op",jl_new_number(3));
+    jl_obj_set(root,"op",jl_new_int(3));
     jl_obj_set(root,"d",dd);
     char *s=jl_stringify(root); jl_free(root);
     if(!s) return -1;
