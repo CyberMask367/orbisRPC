@@ -11,6 +11,7 @@
 #include <orbis/UserService.h>
 #include <orbis/Sysmodule.h>
 #include <orbis/libkernel.h>
+#include <orbis/_types/user.h>
 
 static void base_init(OrbisMsgDialogParam *param){
     memset(param, 0, sizeof(*param));
@@ -25,6 +26,15 @@ static int ui_ready = 0;
 
 int ui_init(void){
     if(ui_ready) return 0;
+    {
+        /* UserService first: dialogs + pad + IME all key off the user.
+         * Best-effort (already-initialized is fine); uid fallbacks
+         * downstream keep every path forward-safe. */
+        OrbisUserServiceInitializeParams up;
+        memset(&up, 0, sizeof up);
+        up.priority = ORBIS_KERNEL_PRIO_FIFO_LOWEST;
+        (void)sceUserServiceInitialize(&up);
+    }
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_BACKEND) < 0) return -1;

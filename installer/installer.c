@@ -1,14 +1,12 @@
-/* installer.c - orbisRPC Setup: Inject -> token -> network test -> tweaks.
- *
- * NAVIGATION LAW (from the last installer trauma): every No/cancel moves
- * FORWARD to the next step. Nothing ever dumps back to the start. The only
- * backward motion is none; the only exits are Done or explicit close.
- */
+/* installer.c - orbisRPC Setup, stripped to the bone:
+ * install files -> wifi check -> token -> inject -> done.
+ * One confirm up front; everything after flows forward. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <errno.h>
 #include "ui.h"
 #include "send.h"
 #include "icfg.h"
@@ -17,169 +15,125 @@
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define EVICT_ELF "/app0/assets/evict.elf"
 #define EVICT_RESULT "/data/orbisRPC/evict.txt"
+#define INST_DIR "/data/orbisRPC"
+#define INST_BIN "/data/orbisRPC/orbisrpc.elf"
 
 static long file_mtime(const char *p){
     struct stat st;
     return (stat(p, &st) == 0) ? (long)st.st_mtime : 0;
 }
 
-static void step_inject_body(void){
-    int port = 0;
-    char msg[160];
-    if(ui_progress_open("Injecting orbisRPC...") != 0){
-        ui_ok("Could not open progress dialog. Continuing.");
-        return;
+static int copy_file(const char *src, const char *dst){
+    FILE *in, *out;
+    static unsigned char buf[65536];
+    size_t n;
+    in = fopen(src, "rb");
+    if(!in) return -1;
+    out = fopen(dst, "wb");
+    if(!out){ fclose(in); return -1; }
+    while((n = fread(buf, 1, sizeof buf, in)) > 0){
+        if(fwrite(buf, 1, n, out) != n){ fclose(in); fclose(out); return -1; }
     }
-    /* Rotate first: a running daemon holds the single-instance lock and
-     * would stand a fresh inject down. Evict exits instantly when nothing
-     * runs, so this is zero-harm in every case. */
-    ui_progress_msg("Stopping old daemon (if any)...");
-    remove(EVICT_RESULT); /* any appearance below = this run finished */
-    if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
-        /* Removal above makes the wait self-limiting: instant evict
-         * answers break the first poll. The full budget only ever
-         * runs when a wedged holder needs the SIGKILL fallback. */
-        int budget = 40;
-        int waited = 0;
-        while(waited < budget){
-            sleep(2);
-            waited += 2;
-            if(file_mtime(EVICT_RESULT) != 0) break;
-            snprintf(msg, sizeof msg, "Stopping old daemon... (%ds)", waited);
-            ui_progress_msg(msg);
+    fclose(in);
+    if(fclose(out) != 0) return -1;
+    return 0;
+}
+
+/* 1: files. 0 ok, -1 fatal (no point continuing without the binary). */
+static int step_files(void){
+    mkdir(INST_DIR, 0777);
+    if(copy_file(DAEMON_ELF, INST_BIN) != 0){
+        ui_ok("Install failed: could not write the daemon.\n\nStopping here.");
+        return -1;
+    }
+    /* Config template when missing; never clobbers learned titles. */
+    {
+        char tok[160];
+        tok[0] = 0;
+        icfg_token_load(ICFG_PATH, tok, sizeof tok);
+        if(!token_valid(tok)){
+            FILE *f = fopen(ICFG_PATH, "rb");
+            if(!f){
+                f = fopen(ICFG_PATH, "wb");
+                if(f){
+                    fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
+                    fclose(f);
+                }
+            } else {
+                fclose(f);
+            }
         }
     }
-    ui_progress_msg("Injecting orbisRPC...");
-    ui_progress_set(0);
-    if(send_file_loopback(DAEMON_ELF, &port, ui_progress_set) == 0){
-        ui_progress_close();
-        snprintf(msg, sizeof msg, "Daemon injected via loader port %d.\n\nIt boots on its own from here.", port);
-        ui_ok(msg);
-    } else {
-        ui_progress_close();
-        ui_ok("Inject failed on every loader port (9090/9021/9020).\n\nIs GoldHEN's BinLoader running? Continuing anyway.");
-    }
+    return 0;
 }
 
-static void step_inject(void){
-    int q = ui_confirm("Inject the orbisRPC daemon now?\n\nSends it to the console's own loader (native, no PC).");
-    if(q != 1) return; /* No -> next step, never back. */
-    step_inject_body();
+/* 2: wifi. Always continues forward; result is information. */
+static void step_wifi(void){
+    int ok;
+    if(ui_progress_open("Checking connection...") != 0) return;
+    ok = net_probe("gateway.discord.gg", 443, 6);
+    ui_progress_close();
+    ui_ok(ok ? "WiFi check: OK.\n\nDiscord is reachable from this console."
+             : "WiFi check: FAILED.\n\nDiscord is unreachable. Presence will not work until the network does.\nContinuing anyway.");
 }
 
+/* 3: token. Skips silently when one already validates. */
 static void step_token(void){
     char tok[160];
     int tries, r;
-    int q = ui_confirm("Set your Discord token?\n\nNeeded for presence. Stored only on this console.");
-    if(q != 1) return;
     tok[0] = 0;
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
+    if(token_valid(tok)){
+        ui_ok("A valid token is already saved.\n\nSkipping.");
+        return;
+    }
     for(tries = 0; tries < 3; tries++){
         r = ui_input("Discord token", "paste token, Done to save", tok, sizeof tok);
-        if(r < 0){ ui_ok("Text input failed. Token step skipped."); return; }
-        if(r == 0) return; /* cancel -> next step */
+        if(r < 0){ ui_ok("Text input failed. Skipping."); return; }
+        if(r == 0) return;
         if(token_valid(tok)){
             r = icfg_token_save(ICFG_PATH, tok);
-            ui_ok(r == 0 ? "Token saved." : "Could not write config. Continuing.");
+            ui_ok(r == 0 ? "Token saved." : "Could not write config.");
             return;
         }
         ui_ok("That doesn't look like a token.\nCheck it and try again, or cancel to skip.");
     }
 }
 
-static void step_nettest(void){
-    static const struct { const char *label; const char *host; int port; } t[] = {
-        { "Discord gateway", "gateway.discord.gg", 443 },
-        { "Discord API", "discord.com", 443 },
-        { "Google DNS (internet)", "8.8.8.8", 53 },
-        { "Sony TMDB (expected: blocked)", "tmdb.np.dl.playstation.net", 80 },
-    };
-    char out[512];
-    size_t used = 0;
-    unsigned i;
-    int q = ui_confirm("Run the network test?\n\nChecks what this console can actually reach.");
-    if(q != 1) return;
-    if(ui_progress_open("Testing network...") != 0) return;
-    used = (size_t)snprintf(out, sizeof out, "Network test:\n");
-    for(i = 0; i < sizeof t/sizeof t[0]; i++){
-        int ok;
-        ui_progress_msg(t[i].label);
-        ok = net_probe(t[i].host, t[i].port, 6);
-        used += (size_t)snprintf(out + used, sizeof out - used,
-                                 "\n%s: %s", t[i].label, ok ? "OK" : "FAIL");
-        if(used >= sizeof out - 64) break;
-        ui_progress_set((unsigned)((i + 1) * 100u / (sizeof t / sizeof t[0])));
-    }
-    ui_progress_close();
-    ui_ok(out);
-}
-
-static void step_tweaks(void){
-    char buf[256];
-    long n;
-    char *end;
-    /* Presence text */
-    if(ui_confirm("Change the idle presence text?") == 1){
-        buf[0] = 0;
-        icfg_get_str(ICFG_PATH, "presence_state", buf, sizeof buf);
-        if(ui_input("Idle text", "e.g. On PS4", buf, sizeof buf) == 1 && buf[0]){
-            if(icfg_set_str(ICFG_PATH, "presence_state", buf) != 0)
-                ui_ok("Could not save. Continuing.");
+/* 4: inject (evict rotation so reinstalls take over). */
+static void step_inject(void){
+    int port = 0;
+    char msg[160];
+    if(ui_progress_open("Starting orbisRPC...") != 0) return;
+    remove(EVICT_RESULT);
+    if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
+        int waited = 0;
+        while(waited < 40){
+            sleep(2);
+            waited += 2;
+            if(file_mtime(EVICT_RESULT) != 0) break;
         }
     }
-    /* Poll interval */
-    if(ui_confirm("Change the poll interval (seconds)?") == 1){
-        buf[0] = 0; /* never prefill a number field with prior text */
-        if(ui_input("Poll interval", "5 to 60", buf, sizeof buf) == 1 && buf[0]){
-            n = strtol(buf, &end, 10);
-            if(end != buf && *end == 0 && n >= 5 && n <= 60){
-                if(icfg_set_int(ICFG_PATH, "poll_interval_s", n) != 0)
-                    ui_ok("Could not save. Continuing.");
-            } else {
-                ui_ok("Must be a number 5..60. Keeping current.");
-            }
-        }
+    ui_progress_msg("Starting orbisRPC...");
+    ui_progress_set(0);
+    if(send_file_loopback(DAEMON_ELF, &port, ui_progress_set) == 0){
+        ui_progress_close();
+        snprintf(msg, sizeof msg, "orbisRPC is running (loader port %d).\n\nLaunch a game and watch Discord.", port);
+        ui_ok(msg);
+    } else {
+        ui_progress_close();
+        ui_ok("Start failed on every loader port.\n\nIs GoldHEN's BinLoader on? The files are installed, so just relaunch this app later.");
     }
-    /* Home art */
-    if(ui_confirm("Change the idle tile art?") == 1){
-        buf[0] = 0;
-        icfg_get_str(ICFG_PATH, "home_art", buf, sizeof buf);
-        if(ui_input("Idle art", "URL, asset key, or empty", buf, sizeof buf) == 1){
-            if(icfg_set_str(ICFG_PATH, "home_art", buf) != 0)
-                ui_ok("Could not save. Continuing.");
-        }
-    }
-    /* Debug logging */
-    {
-        int d = ui_confirm("Turn debug logging on?");
-        if(d == 1) icfg_set_int(ICFG_PATH, "debug", 1);
-        else if(d == 0) icfg_set_int(ICFG_PATH, "debug", 0);
-    }
-    ui_ok("Settings saved (where edited).");
 }
 
 int main(void){
-    char tok[160];
-    int first_run;
-    if(ui_init() != 0) return 1; /* no dialogs possible; exit, don't crash */
-    tok[0] = 0;
-    icfg_token_load(ICFG_PATH, tok, sizeof tok);
-    first_run = !token_valid(tok);
-    if(!first_run){
-        /* Returning user: inject? no -> settings? no -> exit. Forward only. */
-        if(ui_confirm("orbisRPC Setup.\n\nInject the daemon?") == 1){
-            step_inject_body();
-            ui_ok("Done.");
-            return 0;
-        }
-        if(ui_confirm("Open settings instead?") == 1)
-            step_tweaks();
-        return 0;
-    }
-    /* First run wizard: every No skips forward. */
-    step_inject();
+    int q;
+    if(ui_init() != 0) return 1;
+    q = ui_confirm("Install orbisRPC?\n\nCopies the daemon, sets up config, checks WiFi, saves your token, and starts it.");
+    if(q != 1) return 0;
+    if(step_files() != 0) return 0;
+    step_wifi();
     step_token();
-    step_nettest();
-    ui_ok("Setup complete.\n\nLaunch a game and watch Discord.");
+    step_inject();
     return 0;
 }
