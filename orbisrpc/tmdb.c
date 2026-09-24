@@ -5,7 +5,6 @@
 #include "clock.h"
 #include "tmdb_crypto.h"
 #include "log.h"
-#include "art_table.h"
 #include "tls.h"
 #include "updater_http.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
@@ -196,33 +195,6 @@ static int http_get(const char *host, const char *path,
 static struct { char id[16]; char name[128]; char icon[256]; } s_cache[TMDB_CACHE_N];
 static int s_cache_n = 0;
 
-/* Build-time table lookup (Sony CDN data, no network). */
-static int art_table_find(const char *tid,
-                          const char **out_name, const char **out_icon){
-    if(!tid || !out_name || !out_icon) return -1;
-    for(size_t i = 0; i < ORBISRPC_ART_TABLE_N; i++){
-        if(!strcmp(ORBISRPC_ART_TABLE[i].id, tid)){
-            *out_name = ORBISRPC_ART_TABLE[i].name;
-            *out_icon = ORBISRPC_ART_TABLE[i].icon;
-            return 0;
-        }
-    }
-    return -1;
-}
-
-int art_table_lookup(const char *titleId, char *name, size_t name_cap,
-                     char *icon, size_t icon_cap){
-    if(!titleId || !name || name_cap == 0) return -1;
-    const char *tname = NULL, *ticon = NULL;
-    if(art_table_find(titleId, &tname, &ticon) != 0 || !tname) return -1;
-    strncpy(name, tname, name_cap - 1);
-    name[name_cap - 1] = 0;
-    if(icon && icon_cap){
-        if(ticon){ strncpy(icon, ticon, icon_cap - 1); icon[icon_cap - 1] = 0; }
-        else icon[0] = 0;
-    }
-    return 0;
-}
 
 /* HTTPS GET over TLS (port 443) for the same TMDB paths. Uses the shared
  * chunked-aware HTTP parser. Returns body bytes or <=0. */
@@ -312,23 +284,9 @@ int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
             return name[0] ? 0 : -1;
         }
     }
-    /* Build-time Sony table first: same authoritative data, zero network.
-     * (Live TMDB port 80 is unreachable from jailbroken consoles.) */
-    {
-        char tname[128] = "", ticon[256] = "";
-        if(art_table_lookup(titleId, tname, sizeof tname, ticon, sizeof ticon) == 0 && tname[0]){
-            strncpy(name, tname, name_cap-1); name[name_cap-1] = 0;
-            if(icon && icon_cap){ strncpy(icon, ticon, icon_cap-1); icon[icon_cap-1] = 0; }
-            if(s_cache_n < TMDB_CACHE_N){
-                strncpy(s_cache[s_cache_n].id, titleId, 15);
-                strncpy(s_cache[s_cache_n].name, tname, 127);
-                strncpy(s_cache[s_cache_n].icon, ticon, 255);
-                s_cache_n++;
-            }
-            log_msg("name: %s via art-table", name);
-            return 0;
-        }
-    }
+    /* Live Sony CDN first (TMDB over TLS; plain HTTP is blocked
+     * on-console and handled inside http_get/https fallback below).
+     * No baked tables: CUSA code + Sony CDN is the source of truth. */
     char path[128];
     if(tmdb_path(titleId, path, sizeof path) != 0) return -1;
     static char body[TMDB_BODY_MAX];

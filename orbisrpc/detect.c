@@ -22,7 +22,6 @@
 #include "log.h"
 #include "sfo.h"
 #include "tmdb.h"
-#include "nametable.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
  * there is no UserService here — user_init() below degrades. */
@@ -514,7 +513,6 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
         if(!named && pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
         if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
         if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
-        if(!named){ if(nametable_lookup(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via table", out_name); } }
         if(!named){
             char art[256] = "";
             if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
@@ -550,7 +548,6 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     else log_msg("name: appmeta miss for %s", titleId);
     if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, ""); return 0; }
     if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); resolve_remember(titleId, out_name, ""); return 0; }
-    if(nametable_lookup(titleId, out_name, cap)==0){ log_msg("name: %s via table", out_name); resolve_remember(titleId, out_name, ""); return 0; }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){

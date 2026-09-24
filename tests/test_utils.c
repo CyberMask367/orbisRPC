@@ -3,7 +3,6 @@
 #include "../orbisrpc/sfo.h"
 #include "../orbisrpc/tmdb_crypto.h"
 #include "../orbisrpc/updater.h"
-#include "../orbisrpc/nametable.h"
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
 #include "../orbisrpc/manifest.h"
@@ -188,18 +187,6 @@ static void test_updater(void) {
     assert(updater_elf_ok(elf, sizeof elf) == 1);
     elf[18]=99;
     assert(updater_elf_ok(elf, sizeof elf) == 0);
-}
-static void test_nametable(void) {
-    char out[64];
-    assert(nametable_lookup("CUSA00740", out, sizeof out) == 0);
-    assert(strcmp(out, "Terraria") == 0);
-    assert(nametable_lookup("CUSA00411", out, sizeof out) == 0);
-    assert(strcmp(out, "Grand Theft Auto V") == 0);
-    assert(nametable_lookup("XXXX99999", out, sizeof out) != 0);
-    assert(nametable_lookup(NULL, out, sizeof out) != 0);
-    /* tiny buffer: truncated but terminated */
-    assert(nametable_lookup("CUSA00740", out, 4) == 0);
-    assert(out[3] == 0);
 }
 static void test_art_parse(void) {
     /* Real external-assets response shape (verified against live API). */
@@ -404,7 +391,6 @@ int main(void) {
     test_tmdb();
     test_updater();
     test_sfo();
-    test_nametable();
     test_base64();
     test_art_parse();
     test_health_safe_mode();

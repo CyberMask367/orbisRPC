@@ -57,7 +57,8 @@ check("clock/monotonic-deadlines", "orbis_mono_s" in src("orbisrpc/ws.c"))
 # 7. art: mp: proxy path, no raw URLs, pack default
 check("art/mp-proxy", "art_resolve_mp" in disc)
 check("art/no-raw-urls", "mp:" in src("orbisrpc/art.c"))
-check("art/table-generated", "ORBISRPC_ART_TABLE_N" in src("orbisrpc/art_table.h"))
+check("art/live-tmdb", "https_get_tmdb" in src("orbisrpc/tmdb.c"))
+check("art/no-baked-table", "art_table" not in src("orbisrpc/tmdb.c").lower())
 # 8. home + rest handling
 check("home/presence", "presence: home" in d)
 check("shutdown/signals", "daemon_on_signal" in d and "lock_release" in d)
