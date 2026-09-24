@@ -483,7 +483,7 @@ int daemon_run(const char *fixed_game_name){
                         /* Playback queue of one: only clear need_post after
                          * the bytes actually go out. A failed send stays
                          * queued and rides the next tick/reconnect. */
-                        int pr = discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, started);
+                        int pr = discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, g_cfg.home_art[0]?g_cfg.home_art:NULL, started);
                         if(pr == 0){
                             log_msg("presence: %s", last);
                             pres_set(&pres, PS_GAME);
@@ -516,7 +516,7 @@ int daemon_run(const char *fixed_game_name){
                     const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
                     if(discord_set_presence_ex(&dc, state, "PlayStation 4", "home",
                                             g_cfg.application_id, g_cfg.art_base_url,
-                                            g_cfg.home_art[0] ? g_cfg.home_art : NULL, 0) == 0){
+                                            g_cfg.home_art[0] ? g_cfg.home_art : NULL, NULL, 0) == 0){
                         log_msg("presence: home");
                         pres_set(&pres, PS_HOME);
                         n_posts++;

@@ -223,7 +223,7 @@ int discord_connect(discord_t *d, const char *token){
 
 int discord_set_presence(discord_t *d, const char *state, const char *name,
                          const char *application_id, int64_t started_epoch){
-    return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, NULL, started_epoch);
+    return discord_set_presence_ex(d, state, name, NULL, application_id, NULL, NULL, NULL, started_epoch);
 }
 
 /* Lowercase titleId into an asset-key buffer. Returns key length. */
@@ -244,6 +244,7 @@ static size_t asset_key(const char *title_id, char *key, size_t cap){
 jl_val_t *discord_build_activity(const char *state, const char *name,
                           const char *title_id, const char *application_id,
                           const char *art_base_url, const char *art_url,
+                          const char *small_art_url,
                           int64_t started_epoch, const char *token){
     if(!name) return NULL;
     jl_val_t *act=jl_new_object();
@@ -355,16 +356,38 @@ jl_val_t *discord_build_activity(const char *state, const char *name,
             }
         }
     }
+    /* System badge (PC-tool pattern): small corner tile, e.g. the
+     * PlayStation logo next to game art. mp: URLs resolve through the
+     * disk-cached proxy; anything unresolvable is omitted, never sent
+     * raw (bad small images drop the whole activity). */
+    if(small_art_url && small_art_url[0]){
+        char smp[512] = "";
+        const char *simg = NULL;
+        if(!strncmp(small_art_url, "mp:", 3)){
+            simg = small_art_url;
+        } else if(!strncmp(small_art_url, "http", 4) && token && token[0] &&
+                  art_resolve_mp(application_id, token, small_art_url, smp, sizeof smp)){
+            simg = smp;
+        }
+        if(simg){
+            jl_val_t *as = jl_obj_get(act, "assets");
+            if(as && as->type == JL_OBJECT){
+                jl_obj_set(as, "small_image", jl_new_string(simg));
+                jl_obj_set(as, "small_text", jl_new_string("PlayStation 4"));
+            }
+        }
+    }
     return act;
 }
 
 int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                          const char *title_id, const char *application_id,
                          const char *art_base_url, const char *art_url,
+                         const char *small_art_url,
                          int64_t started_epoch){
     if(!d || !d->connected || !name) return -1;
     jl_val_t *act = discord_build_activity(state, name, title_id,
-        application_id, art_base_url, art_url, started_epoch, d->token);
+        application_id, art_base_url, art_url, small_art_url, started_epoch, d->token);
     if(!act) return -1;
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());

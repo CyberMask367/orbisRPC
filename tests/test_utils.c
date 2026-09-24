@@ -495,7 +495,7 @@ static void test_appdb(void) {
 static void test_discord_builder(void) {
     /* game presence: name shown, raw ID nowhere visible, hover has the ID */
     jl_val_t *a = discord_build_activity("On PS4", "Marvel's Spider-Man",
-        "CUSA11995", "1536977374795538532", "https://x/icons/", NULL,
+        "CUSA11995", "1536977374795538532", "https://x/icons/", NULL, NULL,
         1700000000LL, "");
     assert(a);
     const jl_val_t *v = jl_obj_get(a, "name");
@@ -515,23 +515,36 @@ static void test_discord_builder(void) {
     assert(v && v->type == JL_STRING && !strcmp(v->str, "cusa11995"));
     v = jl_obj_get(as, "large_text");
     assert(v && v->type == JL_STRING && !strcmp(v->str, "CUSA11995"));
+    assert(jl_obj_get(as, "small_image") == NULL); /* no badge requested */
+    jl_free(a);
+    /* system badge: mp: URL used as-is with platform hover text */
+    a = discord_build_activity("On PS4", "Marvel's Spider-Man",
+        "CUSA11995", "1536977374795538532", NULL, NULL, "mp:1/2/logo",
+        1700000000LL, "");
+    assert(a);
+    as = jl_obj_get(a, "assets");
+    assert(as && as->type == JL_OBJECT);
+    v = jl_obj_get(as, "small_image");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "mp:1/2/logo"));
+    v = jl_obj_get(as, "small_text");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "PlayStation 4"));
     jl_free(a);
     /* media type mapping survives */
     a = discord_build_activity(NULL, "YouTube", "CUSA01015", "app",
-        NULL, NULL, 0, "");
+        NULL, NULL, NULL, 0, "");
     assert(a);
     v = jl_obj_get(a, "type");
     assert(v && (int)v->num == 0); /* stub maps only CUSA00127 */
     jl_free(a);
     a = discord_build_activity(NULL, "Netflix", "CUSA00127", "app",
-        NULL, NULL, 0, "");
+        NULL, NULL, NULL, 0, "");
     assert(a);
     v = jl_obj_get(a, "type");
     assert(v && (int)v->num == 3);
     jl_free(a);
     /* home + uploaded key: trusted key used as-is */
     a = discord_build_activity("On PS4", "PlayStation 4", "home", "app",
-        NULL, "pslogo", 0, "");
+        NULL, "pslogo", NULL, 0, "");
     assert(a);
     as = jl_obj_get(a, "assets");
     assert(as && as->type == JL_OBJECT);
@@ -542,12 +555,12 @@ static void test_discord_builder(void) {
     jl_free(a);
     /* home with nothing: no assets block at all (never dangling) */
     a = discord_build_activity("On PS4", "PlayStation 4", "home", "app",
-        NULL, NULL, 0, "");
+        NULL, NULL, NULL, 0, "");
     assert(a);
     assert(jl_obj_get(a, "assets") == NULL);
     jl_free(a);
     /* NULL name rejected */
-    assert(discord_build_activity(NULL, NULL, "home", "app", NULL, NULL, 0, "") == NULL);
+    assert(discord_build_activity(NULL, NULL, "home", "app", NULL, NULL, NULL, 0, "") == NULL);
 }
 
 static void test_cfg_learn(void) {
