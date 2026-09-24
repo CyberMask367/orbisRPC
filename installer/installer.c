@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <errno.h>
 #include <orbis/libkernel.h>
+#include <orbis/SystemService.h>
 #include "ui.h"
 #include "send.h"
 #include "icfg.h"
@@ -193,9 +194,11 @@ static void step_inject(void){
 int main(void){
     int q;
     if(ui_init() != 0) return 1;
-    /* Let the system finish bringing the app to foreground before the
-     * first dialog: opening one mid-transition gets auto-dismissed
-     * (looks like a half-second flash, then the app exits). */
+    /* The system holds a splash screen over fresh apps: dialogs opened
+     * under it get auto-dismissed (the half-second flash) or never
+     * surface. Hide it once the UI layer is ready, then let the
+     * foreground transition settle before the first dialog. */
+    sceSystemServiceHideSplashScreen();
     sceKernelSleep(3);
     q = ui_confirm("Install orbisRPC?\n\nCopies the daemon, sets up config, checks WiFi, saves your token, and starts it.");
     if(q != 1) return 0;

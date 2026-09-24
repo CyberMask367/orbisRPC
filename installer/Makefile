@@ -5,7 +5,7 @@ VERSION     := 0.4.0
 TITLE_ID    := ORPC00001
 CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
 
-LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceUserService
+LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceUserService -lSceSystemService
 
 ASSETS      := $(wildcard installer/assets/**/*)
 LIBMODULES  := $(wildcard installer/sce_module/*)
