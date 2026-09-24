@@ -164,6 +164,19 @@ int icfg_get_str(const char *path, const char *key, char *out, size_t cap){
     return 0;
 }
 
+int icfg_titles_count(const char *path){
+    jl_val_t *r = icfg_read(path);
+    const jl_val_t *t;
+    int n = 0;
+    if(!r) return 0;
+    t = jl_obj_get(r, "titles");
+    if(t && t->type == JL_OBJECT){
+        for(jl_val_t *p = t->child; p; p = p->next) n++;
+    }
+    jl_free(r);
+    return n;
+}
+
 int icfg_get_int(const char *path, const char *key, long *out){
     jl_val_t *r = icfg_read(path);
     const jl_val_t *v;

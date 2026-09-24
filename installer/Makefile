@@ -1,7 +1,7 @@
 # orbisRPC Setup installer (OpenOrbis app).
 # Flow: Inject (loopback 9090->9021->9020) -> token -> network test -> tweaks.
 TITLE       := orbisRPC Setup
-VERSION     := 0.4.0
+VERSION     := 1.0.0
 TITLE_ID    := ORPC00001
 CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
 

@@ -21,5 +21,7 @@ int icfg_set_int(const char *path, const char *key, long val);
 /* Read a string/int key. 0 found, -1 missing/unreadable. */
 int icfg_get_str(const char *path, const char *key, char *out, size_t cap);
 int icfg_get_int(const char *path, const char *key, long *out);
+/* Count entries in the "titles" map (learned + manual). Fail-soft 0. */
+int icfg_titles_count(const char *path);
 
 #endif

@@ -7,6 +7,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <time.h>
 #include <orbis/libkernel.h>
 #include <orbis/SystemService.h>
 #include "ui.h"
@@ -15,7 +16,7 @@
 #include "nettest.h"
 
 #ifndef SETUP_VERSION
-#define SETUP_VERSION "0.4.0"
+#define SETUP_VERSION "1.0.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define EVICT_ELF "/app0/assets/evict.elf"
@@ -200,6 +201,34 @@ static void step_inject(void){
     }
 }
 
+/* Status: read-only health snapshot for debugging. Never mutates. */
+static void step_status(void){
+    char out[640];
+    size_t used = 0;
+    char tok[160];
+    struct stat st;
+    tok[0] = 0;
+    icfg_token_load(ICFG_PATH, tok, sizeof tok);
+    used = (size_t)snprintf(out, sizeof out, "orbisRPC status:\n");
+    used += (size_t)snprintf(out + used, sizeof out - used,
+        "\ndaemon files: %s", stat(INST_BIN, &st) == 0 ? "installed" : "missing");
+    used += (size_t)snprintf(out + used, sizeof out - used,
+        "\nlock: %s", stat("/data/orbisRPC/daemon.lock", &st) == 0 ? "held (may be running)" : "free");
+    if(stat("/data/orbisRPC/log.txt", &st) == 0){
+        long age = (long)time(NULL) - (long)st.st_mtime;
+        used += (size_t)snprintf(out + used, sizeof out - used,
+            "\nlog: present, last write %lds ago", age < 0 ? 0 : age);
+    } else {
+        used += (size_t)snprintf(out + used, sizeof out - used, "\nlog: none yet");
+    }
+    used += (size_t)snprintf(out + used, sizeof out - used,
+        "\ntoken: %s", token_valid(tok) ? "saved" : "missing/invalid");
+    used += (size_t)snprintf(out + used, sizeof out - used,
+        "\nlearned titles: %d", icfg_titles_count(ICFG_PATH));
+    if(used >= sizeof out - 64) out[sizeof out - 64] = 0;
+    ui_ok(out);
+}
+
 int main(void){
     int q;
     char welcome[256];
@@ -214,7 +243,12 @@ int main(void){
              "orbisRPC Setup %s\n\nInstalls the daemon, checks WiFi, saves your token, and starts it.",
              SETUP_VERSION);
     q = ui_confirm(welcome);
-    if(q != 1) return 0;
+    if(q != 1){
+        /* Declined install: offer status, then exit. Forward only. */
+        if(ui_confirm("Show daemon status instead?") == 1)
+            step_status();
+        return 0;
+    }
     if(step_files() != 0) return 1;
     step_wifi();
     step_token();
