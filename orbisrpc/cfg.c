@@ -123,6 +123,40 @@ int cfg_title(const cfg_t *c, const char *titleId, char *out, size_t cap){
     return -1;
 }
 
+/* Self-learning map (PC-tool "mapped" pattern): remember an authoritatively
+ * resolved name so later boots resolve instantly even when every live
+ * source is unreachable. Never learns raw-ID echoes or junk.
+ * Returns 1 when the map changed (caller should cfg_save). */
+int cfg_learn(cfg_t *c, const char *titleId, const char *name){
+    if(!c || !titleId || !name) return 0;
+    size_t kl = strlen(titleId), vl = strlen(name);
+    if(kl == 0 || kl >= (size_t)CFG_TITLEID_LEN) return 0;
+    if(vl < 2 || vl >= (size_t)CFG_TITLENAME_LEN) return 0;
+    if(!strcmp(titleId, name)) return 0; /* ID echo, not a name */
+    for(size_t i = 0; i < kl; i++){
+        char ch = titleId[i];
+        if(!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')) return 0;
+    }
+    for(int i = 0; i < c->n_titles; i++){
+        if(!strcmp(c->title_ids[i], titleId)){
+            if(!strcmp(c->title_names[i], name)) return 0;
+            strncpy(c->title_names[i], name, CFG_TITLENAME_LEN - 1);
+            c->title_names[i][CFG_TITLENAME_LEN - 1] = 0;
+            return 1;
+        }
+    }
+    if(c->n_titles >= CFG_MAX_TITLES){
+        log_msg("config: titles map full; not learning %s", titleId);
+        return 0;
+    }
+    strncpy(c->title_ids[c->n_titles], titleId, CFG_TITLEID_LEN - 1);
+    c->title_ids[c->n_titles][CFG_TITLEID_LEN - 1] = 0;
+    strncpy(c->title_names[c->n_titles], name, CFG_TITLENAME_LEN - 1);
+    c->title_names[c->n_titles][CFG_TITLENAME_LEN - 1] = 0;
+    c->n_titles++;
+    return 1;
+}
+
 int cfg_save(const char *path, const cfg_t *c) {
     if(!path || !c) return -1;
     jl_val_t *r = jl_new_object();

@@ -7,6 +7,28 @@
 #include "../orbisrpc/health.h"
 #include "../orbisrpc/manifest.h"
 #include "../orbisrpc/cfg.h"
+#include "../orbisrpc/appdb.h"
+#include "../orbisrpc/discord.h"
+#include "../orbisrpc/detect.h"
+#include "sqlite3.h"
+#include <string.h>
+
+/* discord.c host stubs: builder tests never touch the wire. */
+int detect_media_type(const char *t){
+    if(t && !strcmp(t, "CUSA00127")) return 3;
+    return 0;
+}
+int ws_connect(ws_t *w, const char *h, int p, const char *r, const char *k){
+    (void)w; (void)h; (void)p; (void)r; (void)k; return -1;
+}
+int ws_send_text(ws_t *w, const char *m, size_t n){
+    (void)w; (void)m; (void)n; return -1;
+}
+int ws_recv_frame(ws_t *w, char *b, size_t c, int *o, int *f){
+    (void)w; (void)b; (void)c; (void)o; (void)f; return -1;
+}
+int ws_pong(ws_t *w){ (void)w; return -1; }
+int ws_close(ws_t *w){ (void)w; return -1; }
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>
@@ -425,6 +447,129 @@ static void test_cfg_titles(void) {
     assert(c.home_art[0] == 0);
 }
 
+static void test_appdb(void) {
+    char dir[64], db[96], meta[96], pj[128];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(db, sizeof db, "%s/app.db", dir);
+    snprintf(meta, sizeof meta, "%s/appmeta", dir);
+    assert(mkdir(meta, 0700) == 0);
+    sqlite3 *s = NULL;
+    assert(sqlite3_open_v2(db, &s, SQLITE_OPEN_READWRITE|SQLITE_OPEN_CREATE|SQLITE_OPEN_NOMUTEX, NULL) == SQLITE_OK);
+    assert(sqlite3_exec(s, "CREATE TABLE tbl_appbrowse(titleId TEXT, titleName TEXT);", 0, 0, 0) == SQLITE_OK);
+    assert(sqlite3_exec(s, "INSERT INTO tbl_appbrowse VALUES('CUSA11995','Marvel''s Spider-Man');", 0, 0, 0) == SQLITE_OK);
+    assert(sqlite3_exec(s, "CREATE TABLE tbl_appinfo(titleId TEXT, key TEXT, val TEXT);", 0, 0, 0) == SQLITE_OK);
+    assert(sqlite3_exec(s, "INSERT INTO tbl_appinfo VALUES('CUSA00001','TITLE_01','Lang One');", 0, 0, 0) == SQLITE_OK);
+    assert(sqlite3_exec(s, "INSERT INTO tbl_appinfo VALUES('CUSA00001','TITLE','Base Name');", 0, 0, 0) == SQLITE_OK);
+    assert(sqlite3_exec(s, "INSERT INTO tbl_appinfo VALUES('CUSA00002','TITLE','');", 0, 0, 0) == SQLITE_OK);
+    sqlite3_close(s);
+    char name[128];
+    /* tier 1: browse name wins */
+    assert(appdb_title_from(db, meta, "CUSA11995", name, sizeof name) == 0);
+    assert(!strcmp(name, "Marvel's Spider-Man"));
+    /* tier 2: bare TITLE preferred over TITLE_01 */
+    assert(appdb_title_from(db, meta, "CUSA00001", name, sizeof name) == 0);
+    assert(!strcmp(name, "Base Name"));
+    /* empty val rows never match; no param.json staged -> miss */
+    assert(appdb_title_from(db, meta, "CUSA00002", name, sizeof name) != 0);
+    assert(appdb_title_from(db, meta, "CUSA99999", name, sizeof name) != 0);
+    /* tier 3: staged param.json */
+    char gdir[128];
+    snprintf(gdir, sizeof gdir, "%s/CUSA00002", meta);
+    assert(mkdir(gdir, 0700) == 0);
+    snprintf(pj, sizeof pj, "%s/param.json", gdir);
+    FILE *f = fopen(pj, "wb");
+    assert(f);
+    fputs("{\"titleId\":\"CUSA00002\",\"titleName\":\"JSON Game\"}", f);
+    fclose(f);
+    assert(appdb_title_from(db, meta, "CUSA00002", name, sizeof name) == 0);
+    assert(!strcmp(name, "JSON Game"));
+    /* invalid inputs fail soft */
+    assert(appdb_title_from(db, meta, NULL, name, sizeof name) != 0);
+    assert(appdb_title_from(db, meta, "short", name, sizeof name) != 0);
+    assert(appdb_title_from(db, meta, "cusa11995", name, sizeof name) != 0);
+    assert(appdb_title_from(db, meta, "CUSA1199!", name, sizeof name) != 0);
+    assert(appdb_title_from("/nonexistent/app.db", meta, "CUSA11995", name, sizeof name) != 0);
+    assert(appdb_title_from(db, meta, "CUSA11995", NULL, 0) != 0);
+}
+
+static void test_discord_builder(void) {
+    /* game presence: name shown, raw ID nowhere visible, hover has the ID */
+    jl_val_t *a = discord_build_activity("On PS4", "Marvel's Spider-Man",
+        "CUSA11995", "1536977374795538532", "https://x/icons/", NULL,
+        1700000000LL, "");
+    assert(a);
+    const jl_val_t *v = jl_obj_get(a, "name");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "Marvel's Spider-Man"));
+    assert(jl_obj_get(a, "details") == NULL); /* never the raw ID */
+    v = jl_obj_get(a, "state");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "On PS4"));
+    v = jl_obj_get(a, "type");
+    assert(v && v->type == JL_NUMBER && (int)v->num == 0);
+    const jl_val_t *ts = jl_obj_get(a, "timestamps");
+    assert(ts && ts->type == JL_OBJECT);
+    v = jl_obj_get(ts, "start");
+    assert(v && v->type == JL_NUMBER && v->inum == 1700000000LL * 1000LL);
+    const jl_val_t *as = jl_obj_get(a, "assets");
+    assert(as && as->type == JL_OBJECT);
+    v = jl_obj_get(as, "large_image");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "cusa11995"));
+    v = jl_obj_get(as, "large_text");
+    assert(v && v->type == JL_STRING && !strcmp(v->str, "CUSA11995"));
+    jl_free(a);
+    /* media type mapping survives */
+    a = discord_build_activity(NULL, "YouTube", "CUSA01015", "app",
+        NULL, NULL, 0, "");
+    assert(a);
+    v = jl_obj_get(a, "type");
+    assert(v && (int)v->num == 0); /* stub maps only CUSA00127 */
+    jl_free(a);
+    a = discord_build_activity(NULL, "Netflix", "CUSA00127", "app",
+        NULL, NULL, 0, "");
+    assert(a);
+    v = jl_obj_get(a, "type");
+    assert(v && (int)v->num == 3);
+    jl_free(a);
+    /* home + uploaded key: trusted key used as-is */
+    a = discord_build_activity("On PS4", "PlayStation 4", "home", "app",
+        NULL, "pslogo", 0, "");
+    assert(a);
+    as = jl_obj_get(a, "assets");
+    assert(as && as->type == JL_OBJECT);
+    v = jl_obj_get(as, "large_image");
+    assert(v && !strcmp(v->str, "pslogo"));
+    v = jl_obj_get(as, "large_text");
+    assert(v && !strcmp(v->str, "PlayStation 4"));
+    jl_free(a);
+    /* home with nothing: no assets block at all (never dangling) */
+    a = discord_build_activity("On PS4", "PlayStation 4", "home", "app",
+        NULL, NULL, 0, "");
+    assert(a);
+    assert(jl_obj_get(a, "assets") == NULL);
+    jl_free(a);
+    /* NULL name rejected */
+    assert(discord_build_activity(NULL, NULL, "home", "app", NULL, NULL, 0, "") == NULL);
+}
+
+static void test_cfg_learn(void) {
+    cfg_t c;
+    cfg_defaults(&c);
+    assert(c.n_titles == 0);
+    assert(cfg_learn(&c, "CUSA11995", "Marvel's Spider-Man") == 1);
+    assert(cfg_learn(&c, "CUSA11995", "Marvel's Spider-Man") == 0); /* dup */
+    assert(cfg_learn(&c, "CUSA11995", "CUSA11995") == 0); /* ID echo refused */
+    assert(cfg_learn(&c, "CUSA11995", "x") == 0); /* too short */
+    assert(cfg_learn(&c, "bad key!", "Name") == 0);
+    assert(cfg_learn(&c, "CUSA11995", "Spider-Man 2") == 1); /* update */
+    char name[128];
+    assert(cfg_title(&c, "CUSA11995", name, sizeof name) == 0);
+    assert(!strcmp(name, "Spider-Man 2"));
+    assert(cfg_learn(NULL, "CUSA11995", "N") == 0);
+    assert(cfg_learn(&c, NULL, "N") == 0);
+    /* full map refuses */
+    c.n_titles = CFG_MAX_TITLES;
+    assert(cfg_learn(&c, "CUSA00001", "Full Game") == 0);
+}
+
 int main(void) {
     test_json();
     test_gateway_op_spoof();
@@ -440,6 +585,9 @@ int main(void) {
     test_manifest();
     test_manifest_sig();
     test_cfg_titles();
+    test_cfg_learn();
+    test_appdb();
+    test_discord_builder();
     puts("utility tests passed");
     return 0;
 }

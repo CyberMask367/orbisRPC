@@ -107,8 +107,8 @@ static void art_disk_load(void){
                     if(!m || m->type != JL_STRING || !m->str) continue;
                     if(!a || a->type != JL_NUMBER) continue;
                     if(now - (int64_t)a->num > ART_DISK_TTL) continue; /* prune */
-                    strncpy(s_disk[s_disk_n].url, u->str, 511);
-                    strncpy(s_disk[s_disk_n].mp, m->str, 511);
+                    snprintf(s_disk[s_disk_n].url, sizeof s_disk[s_disk_n].url, "%s", u->str);
+                    snprintf(s_disk[s_disk_n].mp, sizeof s_disk[s_disk_n].mp, "%s", m->str);
                     s_disk[s_disk_n].at = (int64_t)a->num;
                     s_disk_n++;
                 }
@@ -171,15 +171,15 @@ static void art_disk_put(const char *url, const char *mp){
     art_disk_load();
     for(int i = 0; i < s_disk_n; i++){
         if(!strcmp(s_disk[i].url, url)){
-            strncpy(s_disk[i].mp, mp, 511);
+            snprintf(s_disk[i].mp, sizeof s_disk[i].mp, "%s", mp);
             s_disk[i].at = (int64_t)time(NULL);
             art_disk_save();
             return;
         }
     }
     if(s_disk_n < ART_DISK_MAX){
-        strncpy(s_disk[s_disk_n].url, url, 511);
-        strncpy(s_disk[s_disk_n].mp, mp, 511);
+        snprintf(s_disk[s_disk_n].url, sizeof s_disk[s_disk_n].url, "%s", url);
+        snprintf(s_disk[s_disk_n].mp, sizeof s_disk[s_disk_n].mp, "%s", mp);
         s_disk[s_disk_n].at = (int64_t)time(NULL);
         s_disk_n++;
         art_disk_save();
@@ -289,8 +289,8 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
     /* Disk cache (7-day TTL): titles resolved on earlier boots skip the
      * round trip entirely. */
     if(art_disk_get(url, out_mp, cap)){
-        strncpy(s_last_url, url, sizeof s_last_url - 1);
-        strncpy(s_last_mp, out_mp, sizeof s_last_mp - 1);
+        snprintf(s_last_url, sizeof s_last_url, "%s", url);
+        snprintf(s_last_mp, sizeof s_last_mp, "%s", out_mp);
         log_msg("art: mp from disk cache");
         return 1;
     }
@@ -304,8 +304,8 @@ int art_resolve_mp(const char *app_id, const char *token, const char *url,
         log_msg("art: no mp path for url (resp %zuB: %.120s)", rlen, resp);
         return 0;
     }
-    strncpy(s_last_url, url, sizeof s_last_url - 1);
-    strncpy(s_last_mp, out_mp, sizeof s_last_mp - 1);
+    snprintf(s_last_url, sizeof s_last_url, "%s", url);
+    snprintf(s_last_mp, sizeof s_last_mp, "%s", out_mp);
     art_disk_put(url, out_mp);
     log_msg("art: resolved mp (%zuB)", strlen(out_mp));
     return 1;

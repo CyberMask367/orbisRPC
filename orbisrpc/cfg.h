@@ -43,4 +43,6 @@ int cfg_save(const char *path, const cfg_t *c);
 void cfg_defaults(cfg_t *c);
 /* User override lookup: 0 + name copied when titleId has an entry. */
 int cfg_title(const cfg_t *c, const char *titleId, char *out, size_t cap);
+/* Learn an authoritatively resolved name (1 = changed, save it). */
+int cfg_learn(cfg_t *c, const char *titleId, const char *name);
 #endif

@@ -266,10 +266,14 @@ int daemon_run(const char *fixed_game_name){
         }
         int rc = discord_connect(&dc, g_cfg.token);
         if(rc == -2){
-            log_msg("FATAL: token rejected by gateway (close 4004). "
-                    "Fix \"token\" in %s", CFG_PATH);
-            health_mark_clean();
-            return 2;
+            /* Rejected token: do NOT exit (that would strand the daemon
+             * until the next manual injection). The per-cycle config
+             * reload picks up a fixed token on its own. */
+            log_msg("WARN: token rejected by gateway (close 4004). "
+                    "Fix \"token\" in %s; retrying", CFG_PATH);
+            int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
+            if(sleep_stop(wait)) break;
+            continue;
         }
         if(rc != 0){
             int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
@@ -458,6 +462,16 @@ int daemon_run(const char *fixed_game_name){
                         log_msg("GAME_DETECTED title=%s name=%s", cur_tid[0]?cur_tid:"?", name);
                         art_cache_clear();
                         sess_save(cur_tid, name, started);
+                        /* Self-learning map: persist authoritatively resolved
+                         * names so later boots resolve instantly, even when
+                         * every live source is unreachable. Raw-ID fallbacks
+                         * (ok=0) are never learned. */
+                        if(cur_tid[0] && detect_last_ok() && cfg_learn(&g_cfg, cur_tid, name)){
+                            if(cfg_save(CFG_PATH, &g_cfg) != 0)
+                                log_msg("config: learn save failed for %s", cur_tid);
+                            else
+                                log_msg("config: learned %s", cur_tid);
+                        }
                     } else if(strncmp(name,last,sizeof last)!=0){
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;

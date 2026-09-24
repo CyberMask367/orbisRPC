@@ -239,13 +239,15 @@ static size_t asset_key(const char *title_id, char *key, size_t cap){
     return ki;
 }
 
-int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
-                         const char *title_id, const char *application_id,
-                         const char *art_base_url, const char *art_url,
-                         int64_t started_epoch){
-    if(!d || !d->connected || !name) return -1;
+/* Test seam: pure activity-JSON builder (no sockets). token may be ""
+ * to skip the mp: proxy (deterministic offline tests). NULL on OOM. */
+jl_val_t *discord_build_activity(const char *state, const char *name,
+                          const char *title_id, const char *application_id,
+                          const char *art_base_url, const char *art_url,
+                          int64_t started_epoch, const char *token){
+    if(!name) return NULL;
     jl_val_t *act=jl_new_object();
-    if(!act) return -1;
+    if(!act) return NULL;
     jl_obj_set(act,"name",jl_new_string(name?name:""));
     {
         /* Media apps (Netflix/YouTube/...) post Watching/Listening. */
@@ -263,7 +265,7 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
      * title_id is still used for media-type lookup and artwork below. */
     if(started_epoch>0){
         jl_val_t *ts=jl_new_object();
-        if(!ts){ jl_free(act); return -1; }
+        if(!ts){ jl_free(act); return NULL; }
         if(started_epoch > 0 && started_epoch < 100000000000LL)
             jl_obj_set(ts,"start",jl_new_int(started_epoch*1000LL)); /* integer ms epoch */
         jl_obj_set(act,"timestamps",ts);
@@ -289,6 +291,17 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
          * dangling key: those drop the whole activity). */
         const char *hsrc = (art_url&&art_url[0]) ? art_url : NULL;
         char home_pack[320] = "";
+        if(hsrc && strchr(hsrc, '"')) hsrc = NULL; /* config garbage fails
+            soft to the pack default, never a broken JSON POST */
+        if(hsrc && strncmp(hsrc, "http", 4) != 0){
+            for(const char *q = hsrc; *q; q++){
+                char ch = *q;
+                if(!((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') || ch == '_')){
+                    hsrc = NULL; /* not a valid asset key: pack default */
+                    break;
+                }
+            }
+        }
         if(!hsrc && art_base_url&&art_base_url[0]){
             int n=snprintf(home_pack,sizeof home_pack,"%shome.png",art_base_url);
             if(n>0 && (size_t)n<sizeof home_pack) hsrc = home_pack;
@@ -296,7 +309,7 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
         char hmp[512] = "";
         const char *himg = NULL;
         if(hsrc && !strncmp(hsrc,"http",4)){
-            if(d->token[0] && art_resolve_mp(application_id, d->token, hsrc, hmp, sizeof hmp))
+            if(token && token[0] && art_resolve_mp(application_id, token, hsrc, hmp, sizeof hmp))
                 himg = hmp;
         } else if(hsrc){
             himg = hsrc; /* operator-supplied uploaded key: trusted */
@@ -320,12 +333,14 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                 if(n>0 && (size_t)n<sizeof pack_url) src_url = pack_url;
             }
         }
-        if(src_url && d->token[0] &&
-           art_resolve_mp(application_id, d->token, src_url, mp, sizeof mp)){
+        if(src_url && token && token[0] &&
+           art_resolve_mp(application_id, token, src_url, mp, sizeof mp)){
             jl_val_t *as=jl_new_object();
             if(as){
                 jl_obj_set(as,"large_image",jl_new_string(mp));
-                jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+                /* hover carries the raw title ID (PC-tool pattern):
+                 * visible lines stay clean, ID one hover away. */
+                jl_obj_set(as,"large_text",jl_new_string(title_id));
                 jl_obj_set(act,"assets",as);
             }
         } else {
@@ -334,12 +349,23 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                 jl_val_t *as=jl_new_object();
                 if(as){
                     jl_obj_set(as,"large_image",jl_new_string(key));
-                    jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+                    jl_obj_set(as,"large_text",jl_new_string(title_id));
                     jl_obj_set(act,"assets",as);
                 }
             }
         }
     }
+    return act;
+}
+
+int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
+                         const char *title_id, const char *application_id,
+                         const char *art_base_url, const char *art_url,
+                         int64_t started_epoch){
+    if(!d || !d->connected || !name) return -1;
+    jl_val_t *act = discord_build_activity(state, name, title_id,
+        application_id, art_base_url, art_url, started_epoch, d->token);
+    if(!act) return -1;
     jl_val_t *dd=jl_new_object();
     jl_obj_set(dd,"activities",jl_new_array());
     jl_arr_push(jl_obj_get(dd,"activities"), act);

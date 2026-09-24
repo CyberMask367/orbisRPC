@@ -2,6 +2,7 @@
 #ifndef DISCORD_H
 #define DISCORD_H
 #include "ws.h"
+#include "jsonlite.h"
 typedef struct {
     ws_t ws;
     char token[512];
@@ -26,6 +27,11 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
                          const char *title_id, const char *application_id,
                          const char *art_base_url, const char *art_url,
                          int64_t started_epoch); /* op 3 */
+/* Test seam: pure activity-JSON builder (no sockets). token "" skips mp:. */
+jl_val_t *discord_build_activity(const char *state, const char *name,
+                         const char *title_id, const char *application_id,
+                         const char *art_base_url, const char *art_url,
+                         int64_t started_epoch, const char *token);
 int discord_clear_presence(discord_t *d);   /* clear activity, stay online */
 int discord_tick(discord_t *d);             /* 0 ok; -1 drop/reconnect; -2 auth-fatal; -3 invalid session (retry promptly) */
 #endif
