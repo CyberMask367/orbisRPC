@@ -281,7 +281,35 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
      * dangling keys drop the whole activity. Two working forms, tried in
      * order: (1) mp: proxy resolved via external-assets for the URL we
      * have (Sony CDN or art_base_url pack); (2) uploaded asset key. */
-    if(title_id&&title_id[0]&&application_id&&application_id[0]){
+    if(title_id&&!strcmp(title_id,"home")&&application_id&&application_id[0]){
+        /* Idle tile: PlayStation logo. home_art (arrives as art_url):
+         * http(s) URL -> mp: proxy; bare value -> uploaded asset key
+         * used as-is; empty -> <art_base_url>home.png when the pack
+         * carries it. A URL that fails mp: sends NO assets (never a
+         * dangling key: those drop the whole activity). */
+        const char *hsrc = (art_url&&art_url[0]) ? art_url : NULL;
+        char home_pack[320] = "";
+        if(!hsrc && art_base_url&&art_base_url[0]){
+            int n=snprintf(home_pack,sizeof home_pack,"%shome.png",art_base_url);
+            if(n>0 && (size_t)n<sizeof home_pack) hsrc = home_pack;
+        }
+        char hmp[512] = "";
+        const char *himg = NULL;
+        if(hsrc && !strncmp(hsrc,"http",4)){
+            if(d->token[0] && art_resolve_mp(application_id, d->token, hsrc, hmp, sizeof hmp))
+                himg = hmp;
+        } else if(hsrc){
+            himg = hsrc; /* operator-supplied uploaded key: trusted */
+        }
+        if(himg){
+            jl_val_t *as=jl_new_object();
+            if(as){
+                jl_obj_set(as,"large_image",jl_new_string(himg));
+                jl_obj_set(as,"large_text",jl_new_string(name?name:""));
+                jl_obj_set(act,"assets",as);
+            }
+        }
+    } else if(title_id&&title_id[0]&&application_id&&application_id[0]){
         char mp[512] = "";
         const char *src_url = (art_url&&art_url[0]) ? art_url : NULL;
         char pack_url[320] = "";

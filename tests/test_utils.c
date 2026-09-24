@@ -6,6 +6,7 @@
 #include "../orbisrpc/art.h"
 #include "../orbisrpc/health.h"
 #include "../orbisrpc/manifest.h"
+#include "../orbisrpc/cfg.h"
 #include <mbedtls/ecdsa.h>
 #include <mbedtls/ecp.h>
 #include <mbedtls/ctr_drbg.h>
@@ -385,6 +386,45 @@ static void test_base64(void) {
     assert(strcmp(out, "Zm9v") == 0);
 }
 
+static void test_cfg_titles(void) {
+    char dir[64], path[96], path2[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/cfg.json", dir);
+    snprintf(path2, sizeof path2, "%s/cfg2.json", dir);
+    FILE *f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\",\"titles\":{\"CUSA11995\":\"Marvel's Spider-Man\","
+          "\"BAD KEY!\": \"junk\", \"CUSA00001\": \"x\", \"TOOLONGTITLEID12345\": \"y\","
+          "\"CUSA00002\": 42}}", f);
+    fclose(f);
+    cfg_t c;
+    assert(cfg_load(path, &c) == 0);
+    assert(c.n_titles == 1); /* only the well-formed entry survives */
+    char name[128];
+    assert(cfg_title(&c, "CUSA11995", name, sizeof name) == 0);
+    assert(!strcmp(name, "Marvel's Spider-Man"));
+    assert(cfg_title(&c, "CUSA99999", name, sizeof name) != 0);
+    assert(cfg_title(&c, "", name, sizeof name) != 0);
+    assert(cfg_title(NULL, "CUSA11995", name, sizeof name) != 0);
+    /* round-trip: save preserves overrides + home_art */
+    strncpy(c.home_art, "pslogo", sizeof c.home_art - 1);
+    assert(cfg_save(path2, &c) == 0);
+    cfg_t c2;
+    assert(cfg_load(path2, &c2) == 0);
+    assert(c2.n_titles == 1);
+    assert(cfg_title(&c2, "CUSA11995", name, sizeof name) == 0);
+    assert(!strcmp(name, "Marvel's Spider-Man"));
+    assert(!strcmp(c2.home_art, "pslogo"));
+    /* missing titles object: zero overrides, lookup misses */
+    f = fopen(path, "wb");
+    assert(f);
+    fputs("{\"token\":\"t\"}", f);
+    fclose(f);
+    assert(cfg_load(path, &c) == 0);
+    assert(c.n_titles == 0);
+    assert(c.home_art[0] == 0);
+}
+
 int main(void) {
     test_json();
     test_gateway_op_spoof();
@@ -399,6 +439,7 @@ int main(void) {
     test_health_stage_activate();
     test_manifest();
     test_manifest_sig();
+    test_cfg_titles();
     puts("utility tests passed");
     return 0;
 }

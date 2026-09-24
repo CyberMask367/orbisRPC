@@ -18,6 +18,8 @@ void cfg_defaults(cfg_t *c) {
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
+    c->home_art[0] = 0;
+    c->n_titles = 0;
     /* Default art backend: our own Sony-CDN icon pack, resolved through
      * Discord's external-assets proxy (mp:) at post time. Works from the
      * start with zero setup; missing titles degrade to no art. */
@@ -68,8 +70,34 @@ int cfg_load(const char *path, cfg_t *c) {
     STR("token", token);
     STR("application_id", application_id);
     STR("art_base_url", art_base_url);
+    STR("home_art", home_art);
     STR("presence_state", presence_state);
 #undef STR
+    /* User-local title overrides: {"CUSA11995": "Marvel's Spider-Man"}.
+     * Defensive: wrong types, overlong keys/names, and overflow past
+     * CFG_MAX_TITLES are ignored, never fatal. */
+    c->n_titles = 0;
+    o = jl_obj_get(root, "titles");
+    if(o && o->type == JL_OBJECT){
+        for(jl_val_t *p = o->child; p && c->n_titles < CFG_MAX_TITLES; p = p->next){
+            const jl_val_t *v = p->child ? p->child : p;
+            if(!p->str || !v || v->type != JL_STRING || !v->str) continue;
+            size_t kl = strlen(p->str), vl = strlen(v->str);
+            if(kl == 0 || kl >= (size_t)CFG_TITLEID_LEN) continue;
+            if(vl < 2 || vl >= (size_t)CFG_TITLENAME_LEN) continue;
+            int ok = 1;
+            for(size_t i = 0; i < kl; i++){
+                char ch = p->str[i];
+                if(!((ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_')){ ok = 0; break; }
+            }
+            if(!ok) continue;
+            strncpy(c->title_ids[c->n_titles], p->str, CFG_TITLEID_LEN - 1);
+            c->title_ids[c->n_titles][CFG_TITLEID_LEN - 1] = 0;
+            strncpy(c->title_names[c->n_titles], v->str, CFG_TITLENAME_LEN - 1);
+            c->title_names[c->n_titles][CFG_TITLENAME_LEN - 1] = 0;
+            c->n_titles++;
+        }
+    }
     o = jl_obj_get(root, "enabled");         if (o && o->type == JL_BOOL)   c->enabled = (int)o->num;
     o = jl_obj_get(root, "auto_update");     if (o && o->type == JL_BOOL)   c->auto_update = (int)o->num;
     o = jl_obj_get(root, "debug");           if (o && o->type == JL_BOOL)   c->debug = (int)o->num;
@@ -81,6 +109,18 @@ int cfg_load(const char *path, cfg_t *c) {
      * v0 (no key): identical layout, adopt as-is. */
     c->schema_version = CFG_SCHEMA_VERSION;
     return 0;
+}
+
+int cfg_title(const cfg_t *c, const char *titleId, char *out, size_t cap){
+    if(!c || !titleId || !titleId[0] || !out || cap == 0) return -1;
+    for(int i = 0; i < c->n_titles; i++){
+        if(!strcmp(c->title_ids[i], titleId)){
+            strncpy(out, c->title_names[i], cap - 1);
+            out[cap - 1] = 0;
+            return out[0] ? 0 : -1;
+        }
+    }
+    return -1;
 }
 
 int cfg_save(const char *path, const cfg_t *c) {
@@ -96,6 +136,15 @@ int cfg_save(const char *path, const cfg_t *c) {
     jl_obj_set(r, "debug",           jl_new_bool(c->debug));
     jl_obj_set(r, "poll_interval_s", jl_new_number((double)c->poll_interval_s));
     jl_obj_set(r, "presence_state",  jl_new_string(c->presence_state));
+    jl_obj_set(r, "home_art",        jl_new_string(c->home_art));
+    if(c->n_titles > 0){
+        jl_val_t *t = jl_new_object();
+        if(t){
+            for(int i = 0; i < c->n_titles; i++)
+                jl_obj_set(t, c->title_ids[i], jl_new_string(c->title_names[i]));
+            jl_obj_set(r, "titles", t);
+        }
+    }
     char *s = jl_stringify(r);
     if(!s){ log_msg("cfg_save: serialization failed"); jl_free(r); return -1; }
     /* write tmp + fsync + rename so a power loss can't corrupt the config */
@@ -116,4 +165,5 @@ int cfg_save(const char *path, const cfg_t *c) {
         }
     } else { log_msg("cfg_save: cannot write %s", tmp); }
     free(s); jl_free(r);
+    return ok ? 0 : -1;
 }

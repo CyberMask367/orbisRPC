@@ -500,8 +500,9 @@ int daemon_run(const char *fixed_game_name){
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */
                     const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
-                    if(discord_set_presence_ex(&dc, state, "PlayStation 4", NULL,
-                                            g_cfg.application_id, NULL, NULL, 0) == 0){
+                    if(discord_set_presence_ex(&dc, state, "PlayStation 4", "home",
+                                            g_cfg.application_id, g_cfg.art_base_url,
+                                            g_cfg.home_art[0] ? g_cfg.home_art : NULL, 0) == 0){
                         log_msg("presence: home");
                         pres_set(&pres, PS_HOME);
                         n_posts++;
