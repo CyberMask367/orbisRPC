@@ -446,7 +446,7 @@ static void test_cfg_titles(void) {
     fclose(f);
     assert(cfg_load(path, &c) == 0);
     assert(c.n_titles == 0);
-    assert(!strcmp(c.home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/icons/home.png"));
+    assert(!strcmp(c.home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/icons/logo.png"));
 }
 
 static void test_appdb(void) {

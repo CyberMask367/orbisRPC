@@ -18,10 +18,10 @@ void cfg_defaults(cfg_t *c) {
     c->poll_interval_s = 12;
     strncpy(c->token, "SET_ME", sizeof(c->token)-1);
     strncpy(c->presence_state, "On PS4", sizeof(c->presence_state)-1);
-    /* Idle tile ships working: project-hosted PlayStation logo, resolved
+    /* Idle tile ships working: project-hosted orbisRPC logo, resolved
      * through the mp: proxy like every other art URL. Override with any
      * http(s) URL or uploaded asset key. */
-    strncpy(c->home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/icons/home.png",
+    strncpy(c->home_art, "https://raw.githubusercontent.com/SirHumza/orbisRPC/main/config/icons/logo.png",
             sizeof(c->home_art)-1);
     c->n_titles = 0;
     /* Default art backend: our own Sony-CDN icon pack, resolved through
