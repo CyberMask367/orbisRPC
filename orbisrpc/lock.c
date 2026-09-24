@@ -26,7 +26,8 @@ static int pid_live(int pid){
          * only a live payload process counts as a peer. Spawned
          * payloads (elfldr/GoldHEN) show up as "Payload". */
         if(recsz >= 479 && *(int *)(buf + off + 72) == pid)
-            return !memcmp(buf + off + 447, "Payload", 8);
+            return !memcmp(buf + off + 447, "Payload", 8) &&
+                   buf[off + 455] == 0;
         off += (size_t)recsz;
     }
     return 0;

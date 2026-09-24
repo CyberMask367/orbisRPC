@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
 
 #define ICFG_MAX (64u*1024u)
 
@@ -60,6 +61,10 @@ static int icfg_write(const char *path, jl_val_t *r){
     f = fopen(tmp, "wb");
     if(!f){ free(s); return -1; }
     if(fputs(s, f) < 0) ok = 0;
+    if(ok){
+        int fd = fileno(f);
+        if(fd >= 0 && fsync(fd) != 0) ok = 0;
+    }
     if(ok && fclose(f) != 0) ok = 0;
     free(s);
     if(!ok){ remove(tmp); return -1; }
@@ -85,6 +90,7 @@ int icfg_token_load(const char *path, char *out, size_t cap){
 int icfg_token_save(const char *path, const char *token){
     jl_val_t *r;
     int rc;
+    char back[160];
     if(!token_valid(token)) return -1;
     r = icfg_read(path);
     if(!r){
@@ -94,12 +100,20 @@ int icfg_token_save(const char *path, const char *token){
     jl_obj_set(r, "token", jl_new_string(token));
     rc = icfg_write(path, r);
     jl_free(r);
-    return rc == 0 ? 0 : -2;
+    if(rc != 0) return -2;
+    /* Read-back proof: an OOM inside the JSON build saves silently
+     * WITHOUT the key. Never report success on faith. */
+    back[0] = 0;
+    if(icfg_token_load(path, back, sizeof back) != 0 ||
+       strcmp(back, token) != 0)
+        return -2;
+    return 0;
 }
 
 int icfg_set_str(const char *path, const char *key, const char *val){
     jl_val_t *r;
     int rc;
+    char back[256];
     if(!key || !key[0] || !val) return -1;
     r = icfg_read(path);
     if(!r){
@@ -109,12 +123,18 @@ int icfg_set_str(const char *path, const char *key, const char *val){
     jl_obj_set(r, key, jl_new_string(val));
     rc = icfg_write(path, r);
     jl_free(r);
-    return rc;
+    if(rc != 0) return -1;
+    back[0] = 0;
+    if(icfg_get_str(path, key, back, sizeof back) != 0 ||
+       strcmp(back, val) != 0)
+        return -1;
+    return 0;
 }
 
 int icfg_set_int(const char *path, const char *key, long val){
     jl_val_t *r;
     int rc;
+    long back = 0;
     if(!key || !key[0]) return -1;
     r = icfg_read(path);
     if(!r){
@@ -124,7 +144,9 @@ int icfg_set_int(const char *path, const char *key, long val){
     jl_obj_set(r, key, jl_new_int(val));
     rc = icfg_write(path, r);
     jl_free(r);
-    return rc;
+    if(rc != 0) return -1;
+    if(icfg_get_int(path, key, &back) != 0 || back != val) return -1;
+    return 0;
 }
 
 int icfg_get_str(const char *path, const char *key, char *out, size_t cap){
@@ -132,7 +154,7 @@ int icfg_get_str(const char *path, const char *key, char *out, size_t cap){
     const jl_val_t *v;
     if(!out || cap == 0) return -1;
     out[0] = 0;
-    if(!r || !key) return -1;
+    if(!r || !key){ if(r) jl_free(r); return -1; }
     v = jl_obj_get(r, key);
     if(v && v->type == JL_STRING && v->str){
         strncpy(out, v->str, cap - 1);
@@ -146,7 +168,7 @@ int icfg_get_int(const char *path, const char *key, long *out){
     jl_val_t *r = icfg_read(path);
     const jl_val_t *v;
     if(!out) return -1;
-    if(!r || !key) return -1;
+    if(!r || !key){ if(r) jl_free(r); return -1; }
     v = jl_obj_get(r, key);
     if(v && v->type == JL_NUMBER){
         *out = v->num_is_int ? (long)v->inum : (long)v->num;

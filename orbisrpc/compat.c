@@ -4,6 +4,7 @@
 #include <stddef.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <errno.h>
 #include <time.h>
 #include <stdint.h>
 #include "clock.h"
@@ -49,6 +50,7 @@ __attribute__((weak)) int getentropy(void *buf, size_t n){
     size_t got = 0;
     while(got < n){
         long r = read(fd, (char*)buf + got, n - got);
+        if(r < 0 && errno == EINTR) continue; /* signal delivery, not failure */
         if(r <= 0){ close(fd); return -1; }
         got += (size_t)r;
     }

@@ -28,7 +28,8 @@ jobs:
           ./scripts/build_sdk.sh
       - name: gate daemon-world linkage only
         run: |
-          NEEDED=$(llvm-readelf -d build-sdk/orbisrpc_sdk.elf | grep NEEDED | sed 's/.*\[//;s/\]//')
+          export LLVM_READELF="$(command -v llvm-readelf || echo /usr/lib/llvm-14/bin/llvm-readelf)"
+          NEEDED=$("$LLVM_READELF" -d build-sdk/orbisrpc_sdk.elf | grep NEEDED | sed 's/.*\[//;s/\]//')
           echo "$NEEDED"
           echo "$NEEDED" | grep -q libkernel_web.sprx || { echo "missing libkernel_web"; exit 1; }
           echo "$NEEDED" | grep -q libSceLibcInternal.sprx || { echo "missing libSceLibcInternal"; exit 1; }

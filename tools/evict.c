@@ -38,7 +38,10 @@ static int payload_live(int pid){
         int recsz = *(int *)(buf + off);
         if(recsz <= 0 || off + (size_t)recsz > sz) break;
         if(recsz >= 479 && *(int *)(buf + off + 72) == pid)
-            return !memcmp(buf + off + 447, "Payload", 8);
+            /* Exact "Payload" + NUL: a prefix match would bless
+             * PayloadHelper-style names for the kill list. */
+            return !memcmp(buf + off + 447, "Payload", 8) &&
+                   buf[off + 455] == 0;
         off += (size_t)recsz;
     }
     return 0;

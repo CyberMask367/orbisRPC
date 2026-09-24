@@ -10,7 +10,10 @@ LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialo
 ASSETS      := $(wildcard installer/assets/**/*)
 LIBMODULES  := $(wildcard installer/sce_module/*)
 
-TOOLCHAIN   := $(OO_PS4_TOOLCHAIN)
+TOOLCHAIN   ?= $(OO_PS4_TOOLCHAIN)
+ifeq ($(TOOLCHAIN),)
+TOOLCHAIN   := /Users/mac/PS4Toolchain/OpenOrbis/PS4Toolchain
+endif
 PROJDIR     := installer
 COMMONDIR   := $(TOOLCHAIN)/samples/_common
 INTDIR      := $(PROJDIR)/x64/Debug
