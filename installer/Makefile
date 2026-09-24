@@ -1,0 +1,67 @@
+# orbisRPC Setup installer (OpenOrbis app).
+# Flow: Inject (loopback 9090->9021->9020) -> token -> network test -> tweaks.
+TITLE       := orbisRPC Setup
+VERSION     := 0.4.0
+TITLE_ID    := ORPC00001
+CONTENT_ID  := IV0000-ORPC00001_00-ORBISRPCSETUP000
+
+LIBS        := -lc -lkernel -lc++ -lSceMsgDialog -lSceCommonDialog -lSceImeDialog -lSceSysmodule -lSceNet -lSceSsl -lSceSystemService -lSceUserService
+
+ASSETS      := $(wildcard installer/assets/**/*)
+LIBMODULES  := $(wildcard installer/sce_module/*)
+
+TOOLCHAIN   := $(OO_PS4_TOOLCHAIN)
+PROJDIR     := installer
+COMMONDIR   := $(TOOLCHAIN)/samples/_common
+INTDIR      := $(PROJDIR)/x64/Debug
+
+CFILES      := $(wildcard $(PROJDIR)/*.c)
+CPPFILES    := $(wildcard $(PROJDIR)/*.cpp)
+OBJS        := $(patsubst $(PROJDIR)/%.c, $(INTDIR)/%.o, $(CFILES)) $(patsubst $(PROJDIR)/%.cpp, $(INTDIR)/%.o, $(CPPFILES))
+
+# llvmshim (no brew): export PATH="$HOME/llvmshim:$PATH" before make.
+LLVM        := $(HOME)/llvmshim
+CC          := $(LLVM)/clang
+CCX         := $(LLVM)/clang++
+LD          := $(LLVM)/ld.lld
+CDIR        := macos
+
+CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include -Iorbisrpc -Iinstaller
+CXXFLAGS    := $(CFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1
+LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o -L$(TOOLCHAIN)/lib
+
+_unused     := $(shell mkdir -p $(INTDIR))
+
+all: $(CONTENT_ID).pkg
+
+$(CONTENT_ID).pkg: installer/pkg.gp4
+	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core pkg_build pkg.gp4 . && mv $(CONTENT_ID).pkg ..
+
+installer/pkg.gp4: installer/eboot.bin installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png $(LIBMODULES) $(ASSETS)
+	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
+
+installer/sce_sys/param.sfo: installer/Makefile
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_new $@
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_TYPE --type Integer --maxsize 4 --value 1
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ APP_VER --type Utf8 --maxsize 8 --value '$(VERSION)'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ ATTRIBUTE --type Integer --maxsize 4 --value 0
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CATEGORY --type Utf8 --maxsize 4 --value 'gd'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ CONTENT_ID --type Utf8 --maxsize 48 --value '$(CONTENT_ID)'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ DOWNLOAD_DATA_SIZE --type Integer --maxsize 4 --value 0
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ SYSTEM_VER --type Integer --maxsize 4 --value 0
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ TITLE --type Utf8 --maxsize 128 --value '$(TITLE)'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ TITLE_ID --type Utf8 --maxsize 12 --value '$(TITLE_ID)'
+	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_setentry $@ VERSION --type Utf8 --maxsize 8 --value '$(VERSION)'
+
+installer/eboot.bin: $(OBJS)
+	$(LD) $(INTDIR)/*.o -o $(INTDIR)/$(PROJDIR).elf $(LDFLAGS)
+	$(TOOLCHAIN)/bin/$(CDIR)/create-fself-macos -in=$(INTDIR)/$(PROJDIR).elf -out=$(INTDIR)/$(PROJDIR).oelf --eboot "installer/eboot.bin" --paid 0x3800000000000011
+
+$(INTDIR)/%.o: $(PROJDIR)/%.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+$(INTDIR)/%.o: $(PROJDIR)/%.cpp
+	$(CCX) $(CXXFLAGS) -o $@ $<
+
+clean:
+	rm -rf $(INTDIR) eboot.bin pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo
