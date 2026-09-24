@@ -39,13 +39,62 @@ static int copy_file(const char *src, const char *dst){
     return 0;
 }
 
-/* 1: files. 0 ok, -1 fatal (no point continuing without the binary). */
+/* mkdir -p (parents as needed). 0 ok or already there. */
+static int mkdirs(const char *path){
+    char tmp[256];
+    size_t i, n;
+    if(!path || !path[0]) return -1;
+    n = strlen(path);
+    if(n >= sizeof tmp) return -1;
+    memcpy(tmp, path, n + 1);
+    for(i = 1; i < n; i++){
+        if(tmp[i] == '/'){
+            tmp[i] = 0;
+            mkdir(tmp, 0777);
+            tmp[i] = '/';
+        }
+    }
+    if(mkdir(path, 0777) != 0 && errno != EEXIST) return -1;
+    return 0;
+}
+
+/* Every payload directory any GoldHEN-era tool scans, written + reported
+ * individually. App sandboxing may deny some; each result is shown so the
+ * real one is visible instead of guessed. */
+static const char *payload_dirs[] = {
+    "/data/GoldHEN/payloads",
+    "/data/GoldHEN/bin/elf",
+    "/data/payloads",
+    "/data/bin/elf",
+    "/user/data/payloads",
+};
+
 static int step_files(void){
+    char line[320];
+    char report[768];
+    size_t used;
+    unsigned i;
+    int bins = 0;
     mkdir(INST_DIR, 0777);
     if(copy_file(DAEMON_ELF, INST_BIN) != 0){
         ui_ok("Install failed: could not write the daemon.\n\nStopping here.");
         return -1;
     }
+    used = (size_t)snprintf(report, sizeof report, "Daemon installed to:\n%s", INST_BIN);
+    for(i = 0; i < sizeof payload_dirs/sizeof payload_dirs[0]; i++){
+        int ok = -1;
+        if(mkdirs(payload_dirs[i]) == 0){
+            snprintf(line, sizeof line, "%s/orbisrpc.bin", payload_dirs[i]);
+            ok = copy_file(DAEMON_ELF, line);
+        }
+        if(ok == 0) bins++;
+        used += (size_t)snprintf(report + used, sizeof report - used,
+                                 "\n%s : %s", payload_dirs[i], ok == 0 ? "OK" : "denied");
+        if(used >= sizeof report - 64) break;
+    }
+    snprintf(report + used, sizeof report - used,
+             "\n\nWhichever loader lists payloads, one of these is it (%d placed).", bins);
+    ui_ok(report);
     /* Config template when missing; never clobbers learned titles. */
     {
         char tok[160];
