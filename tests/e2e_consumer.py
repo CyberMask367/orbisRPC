@@ -90,7 +90,13 @@ if os.path.exists(elf):
     check("linkage/no-app-libs",
           not any(n in ("libkernel.so", "libc.so") for n in needed),
           ",".join(needed))
-else:
+check("detect/unknown-holds", "scan_unknown" in d)
+check("detect/eboot-fast-switch", "fast-switching" in d)
+check("detect/atime-identity", "pkg-atime" in src("orbisrpc/detect.c") or "st_atime" in src("orbisrpc/detect.c"))
+check("detect/no-baked-table", "nametable" not in src("orbisrpc/detect.c").lower())
+check("session/validates-restore", "failed validation" in d)
+elf = os.path.join(ROOT, "build-sdk", "orbisrpc_sdk.elf")
+if not os.path.exists(elf):
     check("linkage/payload-built", False, "run scripts/build_sdk.sh first")
 print(f"{len(fails)} failures" if fails else "E2E host simulation: ALL PASS")
 sys.exit(1 if fails else 0)
