@@ -299,6 +299,11 @@ int daemon_run(const char *fixed_game_name){
         static char sess_tid[16] = "";
         static int64_t started = 0;
         static int64_t last_tsync = 0;
+        static int home_posted = 0;
+        /* Fresh (re)connect invalidates whatever Discord shows: re-post the
+         * current state (game via need_post below, home via home_posted
+         * reset) so a drop can never leave a stale/blank tile behind. */
+        home_posted = 0;
         /* Resume window: if the same title vanishes briefly (detection
          * flicker, quick menu hop) and returns within 10 minutes, the
          * timer resumes instead of resetting to 0:00. */
@@ -361,7 +366,6 @@ int daemon_run(const char *fixed_game_name){
         static int cand_hits = 0, miss_hits = 0;
         int64_t last_poll = 0;
         int64_t last_alive = 0;
-        static int home_posted = 0;
         static int healthy_marked = 0;
         /* re-post after every (re)connect so Discord never sticks on stale */
         int need_post = active && last[0];
@@ -531,11 +535,14 @@ int daemon_run(const char *fixed_game_name){
              * more than a second or two late or the server drops us */
             int tr = discord_tick(&dc);
             if(tr == -2){
-                log_msg("FATAL: token rejected (close 4004). Fix %s", CFG_PATH);
+                /* Token rejected mid-session: same policy as connect-time
+                 * 4004 (never strand the daemon). Drop to the outer loop:
+                 * backoff + config reload picks up a fixed token alone. */
+                log_msg("WARN: token rejected (close 4004). Fix %s; retrying", CFG_PATH);
                 ws_close(&dc.ws);
-                health_mark_clean();
-                log_close();
-                return 2;
+                pres_set(&pres, PS_NONE);
+                if(sleep_stop(reconnect_delay(&conn_fails, base_poll, &jctr))) break;
+                break;
             }
             if(tr == -3){
                 int wait = reconnect_delay(&conn_fails, base_poll, &jctr);

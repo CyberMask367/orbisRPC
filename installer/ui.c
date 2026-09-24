@@ -36,9 +36,21 @@ int ui_init(void){
         (void)sceUserServiceInitialize(&up);
     }
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
-    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0) return -1;
-    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_BACKEND) < 0) return -1;
-    if(sceCommonDialogInitialize() < 0) return -1;
+    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0){
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
+        return -1;
+    }
+    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_BACKEND) < 0){
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
+        return -1;
+    }
+    if(sceCommonDialogInitialize() < 0){
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_BACKEND);
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
+        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
+        return -1;
+    }
     ui_ready = 1;
     return 0;
 }
@@ -86,7 +98,11 @@ static int progress_open = 0;
 int ui_progress_open(const char *msg){
     OrbisMsgDialogParam param;
     OrbisMsgDialogProgressBarParam bar;
-    if(progress_open) return 0;
+    if(progress_open){
+        /* Self-healing: a prior session that died between open and close
+         * leaves the flag set with no dialog behind it. Reclaim it. */
+        ui_progress_close();
+    }
     sceMsgDialogInitialize();
     base_init(&param);
     param.mode = ORBIS_MSG_DIALOG_MODE_PROGRESS_BAR;

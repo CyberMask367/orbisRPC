@@ -108,6 +108,7 @@ int send_file_loopback(const char *path, int *port_used, void (*progress)(unsign
     for(i = 0; i < sizeof SEND_PORTS/sizeof SEND_PORTS[0]; i++){
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in sa;
+        struct timeval tv = { 20, 0 };
         if(fd < 0) continue;
         memset(&sa, 0, sizeof sa);
         sa.sin_family = AF_INET;
@@ -117,6 +118,10 @@ int send_file_loopback(const char *path, int *port_used, void (*progress)(unsign
             close(fd);
             continue;
         }
+        /* Back to blocking for the bulk send, WITH a send timeout so a
+         * stalled loader surfaces EAGAIN (capped retries below) instead
+         * of wedging forever. */
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
         if(send_one(fd, path, progress) == 0){
             close(fd);
             if(port_used) *port_used = SEND_PORTS[i];

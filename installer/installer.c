@@ -194,7 +194,7 @@ int main(void){
     if(ui_init() != 0) return 1;
     q = ui_confirm("Install orbisRPC?\n\nCopies the daemon, sets up config, checks WiFi, saves your token, and starts it.");
     if(q != 1) return 0;
-    if(step_files() != 0) return 0;
+    if(step_files() != 0) return 1;
     step_wifi();
     step_token();
     step_inject();

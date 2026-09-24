@@ -37,7 +37,7 @@ all: $(CONTENT_ID).pkg
 $(CONTENT_ID).pkg: installer/pkg.gp4
 	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core pkg_build pkg.gp4 . && mv $(CONTENT_ID).pkg ..
 
-installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/assets/evict.elf installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png $(LIBMODULES) $(ASSETS)
+installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/assets/evict.elf installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png installer/sce_sys/pic1.png $(LIBMODULES) $(ASSETS)
 	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin assets/daemon.elf assets/evict.elf sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_sys/pic1.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
 
 installer/sce_sys/param.sfo: installer/Makefile
@@ -67,9 +67,6 @@ $(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c
 installer/assets/daemon.elf: build-sdk/orbisrpc_sdk.elf
 	cp $< $@
 installer/assets/evict.elf: build-sdk/evict.elf
-	cp $< $@
-# Brand logo placeholder (PS mark) until the ORBIS RPC art lands.
-installer/assets/logo.png: config/icons/home.png
 	cp $< $@
 
 $(INTDIR)/%.o: $(PROJDIR)/%.cpp
