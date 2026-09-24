@@ -25,7 +25,6 @@ static long file_mtime(const char *p){
 
 static void step_inject_body(void){
     int port = 0;
-    long before;
     char msg[160];
     if(ui_progress_open("Injecting orbisRPC...") != 0){
         ui_ok("Could not open progress dialog. Continuing.");
@@ -35,18 +34,17 @@ static void step_inject_body(void){
      * would stand a fresh inject down. Evict exits instantly when nothing
      * runs, so this is zero-harm in every case. */
     ui_progress_msg("Stopping old daemon (if any)...");
-    before = file_mtime(EVICT_RESULT);
+    remove(EVICT_RESULT); /* any appearance below = this run finished */
     if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
-        /* No prior result file means first-ever run (or wiped data):
-         * evict answers instantly there, so only wait briefly. An
-         * existing install gets the full grace period (clean stop is
-         * fast; a wedged holder needs the SIGKILL fallback window). */
-        int budget = (before == 0) ? 10 : 40;
+        /* Removal above makes the wait self-limiting: instant evict
+         * answers break the first poll. The full budget only ever
+         * runs when a wedged holder needs the SIGKILL fallback. */
+        int budget = 40;
         int waited = 0;
         while(waited < budget){
             sleep(2);
             waited += 2;
-            if(file_mtime(EVICT_RESULT) != before) break;
+            if(file_mtime(EVICT_RESULT) != 0) break;
             snprintf(msg, sizeof msg, "Stopping old daemon... (%ds)", waited);
             ui_progress_msg(msg);
         }
@@ -110,7 +108,7 @@ static void step_nettest(void){
         used += (size_t)snprintf(out + used, sizeof out - used,
                                  "\n%s: %s", t[i].label, ok ? "OK" : "FAIL");
         if(used >= sizeof out - 64) break;
-        ui_progress_set((i + 1) * 100 / 4);
+        ui_progress_set((unsigned)((i + 1) * 100u / (sizeof t / sizeof t[0])));
     }
     ui_progress_close();
     ui_ok(out);
@@ -131,6 +129,7 @@ static void step_tweaks(void){
     }
     /* Poll interval */
     if(ui_confirm("Change the poll interval (seconds)?") == 1){
+        buf[0] = 0; /* never prefill a number field with prior text */
         if(ui_input("Poll interval", "5 to 60", buf, sizeof buf) == 1 && buf[0]){
             n = strtol(buf, &end, 10);
             if(end != buf && *end == 0 && n >= 5 && n <= 60){

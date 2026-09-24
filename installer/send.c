@@ -20,9 +20,15 @@ static const int SEND_PORTS[] = { 9090, 9021, 9020 };
 int net_init(void){
 #ifdef INSTALLER_PS4
     static int done = 0;
+    int probe;
     if(done) return 0;
-    if(sceNetInit() < 0) return -1;
-    if(sceNetPoolCreate("orbisrpc", 64*1024, 0) < 0) return -1;
+    /* Best-effort: the stack may already be up (re-init calls then fail
+     * harmlessly). Ground truth is a probe socket, not return codes. */
+    (void)sceNetInit();
+    (void)sceNetPoolCreate("orbisrpc", 64*1024, 0);
+    probe = socket(AF_INET, SOCK_STREAM, 0);
+    if(probe < 0) return -1;
+    close(probe);
     done = 1;
 #endif
     return 0;
@@ -41,13 +47,19 @@ static int send_one(int fd, const char *path, void (*progress)(unsigned)){
     if(progress) progress(0);
     while((n = fread(buf, 1, sizeof buf, f)) > 0){
         size_t off = 0;
+        int stalls = 0;
         while(off < n){
             ssize_t w = send(fd, buf + off, n - off, 0);
             if(w <= 0){
-                if(errno == EAGAIN || errno == EWOULDBLOCK) continue;
+                /* Blocking socket + SNDTIMEO: EAGAIN means the loader
+                 * stopped reading. Retry briefly, then fail instead of
+                 * spinning forever. */
+                if((errno == EAGAIN || errno == EWOULDBLOCK) && ++stalls < 4)
+                    continue;
                 fclose(f);
                 return -1;
             }
+            stalls = 0;
             off += (size_t)w;
         }
         sent += (long)n;

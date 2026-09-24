@@ -1,6 +1,6 @@
 /* ui.c - native PS4 dialogs: MsgDialog (ok / yes-no / progress) + ImeDialog.
- * Host-testable pure parts live in ui_text.c; everything here needs the
- * console (dialog system calls). */
+ * Everything here needs the console (dialog system calls); pure logic
+ * (validation, config merge) lives in icfg.c and is host-tested. */
 #include "ui.h"
 #include <stdio.h>
 #include <string.h>
@@ -137,11 +137,21 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     st.verticalAlignment = ORBIS_V_CENTER;
     st.placeholder = wplace;
     st.title = wtitle;
-    sceImeDialogInit(&st, NULL);
-    /* Pump until the OSK stops (IME uses its own status enum). */
-    while(sceImeDialogGetStatus() != ORBIS_DIALOG_STATUS_STOPPED){
-        /* The dialog system needs no explicit pump; yield briefly. */
-        sceKernelUsleep(20000);
+    if(sceImeDialogInit(&st, NULL) < 0) return -1;
+    /* Pump until the OSK stops (IME uses its own status enum). Bounded:
+     * a dialog stuck in NONE (failed init we couldn't see) aborts instead
+     * of hanging the installer forever. */
+    {
+        int spins = 0;
+        OrbisDialogStatus ds;
+        while((ds = sceImeDialogGetStatus()) != ORBIS_DIALOG_STATUS_STOPPED){
+            if(ds == ORBIS_DIALOG_STATUS_NONE && ++spins > 250){
+                sceImeDialogTerm();
+                return -1;
+            }
+            if(ds != ORBIS_DIALOG_STATUS_NONE) spins = 0;
+            sceKernelUsleep(20000);
+        }
     }
     memset(&res, 0, sizeof res);
     if(sceImeDialogGetResult(&res) < 0){ sceImeDialogTerm(); return -1; }
