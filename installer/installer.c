@@ -14,6 +14,9 @@
 #include "icfg.h"
 #include "nettest.h"
 
+#ifndef SETUP_VERSION
+#define SETUP_VERSION "0.4.0"
+#endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define EVICT_ELF "/app0/assets/evict.elf"
 #define EVICT_RESULT "/data/orbisRPC/evict.txt"
@@ -199,6 +202,7 @@ static void step_inject(void){
 
 int main(void){
     int q;
+    char welcome[256];
     if(ui_init() != 0) return 1;
     /* The system holds a splash screen over fresh apps: dialogs opened
      * under it get auto-dismissed (the half-second flash) or never
@@ -206,11 +210,18 @@ int main(void){
      * foreground transition settle before the first dialog. */
     sceSystemServiceHideSplashScreen();
     sceKernelSleep(3);
-    q = ui_confirm("Install orbisRPC?\n\nCopies the daemon, sets up config, checks WiFi, saves your token, and starts it.");
+    snprintf(welcome, sizeof welcome,
+             "orbisRPC Setup %s\n\nInstalls the daemon, checks WiFi, saves your token, and starts it.",
+             SETUP_VERSION);
+    q = ui_confirm(welcome);
     if(q != 1) return 0;
     if(step_files() != 0) return 1;
     step_wifi();
     step_token();
     step_inject();
+    ui_ok("Setup " SETUP_VERSION " complete.\n\n"
+          "After a reboot, re-jailbreak, then open GoldHEN's payload menu\n"
+          "and enable AutoRun for orbisrpc — it will start itself\n"
+          "on every jailbreak from then on.");
     return 0;
 }
