@@ -384,12 +384,14 @@ static long scan_one_appdir(const char *base, char *out, size_t cap, long best){
     closedir(d);
     return best;
 }
+#ifndef ORBISRPC_SDK_PAYLOAD
 static long scan_recent_titleid(char *out, size_t cap){
     out[0]=0;
     long best = scan_one_appdir("/user/app", out, cap, -1);
     best = scan_one_appdir("/data/app", out, cap, best);
     return (out[0])? 0 : -1;
 }
+#endif /* scan_recent_titleid unused in SDK builds */
 
 /* Best name on the box: /user/appmeta/<id>/pronunciation.xml holds the
  * display title in its first <text> element (works for every game that
