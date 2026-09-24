@@ -166,8 +166,22 @@ static void step_inject(void){
     ui_progress_msg("Starting orbisRPC...");
     ui_progress_set(0);
     if(send_file_loopback(DAEMON_ELF, &port, ui_progress_set) == 0){
+        /* Prove it booted: the daemon writes its log within seconds.
+         * No growth after ~25 s = sent but not running (say so). */
+        long lsz = file_mtime("/data/orbisRPC/log.txt");
+        int waited = 0;
+        int alive = 0;
+        ui_progress_msg("Waiting for first heartbeat...");
+        while(waited < 25){
+            sleep(2);
+            waited += 2;
+            if(file_mtime("/data/orbisRPC/log.txt") != lsz){ alive = 1; break; }
+        }
         ui_progress_close();
-        snprintf(msg, sizeof msg, "orbisRPC is running (loader port %d).\n\nLaunch a game and watch Discord.", port);
+        if(alive)
+            snprintf(msg, sizeof msg, "orbisRPC is running (loader port %d).\n\nLaunch a game and watch Discord.", port);
+        else
+            snprintf(msg, sizeof msg, "Sent via port %d but no heartbeat yet.\n\nGive it a minute; if Discord stays dark, relaunch this app.", port);
         ui_ok(msg);
     } else {
         ui_progress_close();

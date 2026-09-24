@@ -10,6 +10,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#include <sys/select.h>
 #ifdef INSTALLER_PS4
 #include <orbis/Net.h>
 #endif
@@ -32,6 +33,36 @@ int net_init(void){
     done = 1;
 #endif
     return 0;
+}
+
+int sock_connect_deadline(int fd, const struct sockaddr *sa, socklen_t len, int timeout_s){
+    int flags, rc, err = 0;
+    socklen_t elen = sizeof err;
+    fd_set wf;
+    struct timeval tv;
+    if(timeout_s < 1) timeout_s = 1;
+    if(timeout_s > 15) timeout_s = 15;
+    flags = fcntl(fd, F_GETFL, 0);
+    if(flags < 0) return -1;
+    if(fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0) return -1;
+    rc = connect(fd, sa, len);
+    if(rc == 0){
+        fcntl(fd, F_SETFL, flags);
+        return 0;
+    }
+    if(errno != EINPROGRESS){
+        fcntl(fd, F_SETFL, flags);
+        return -1;
+    }
+    FD_ZERO(&wf);
+    FD_SET(fd, &wf);
+    tv.tv_sec = timeout_s;
+    tv.tv_usec = 0;
+    rc = select(fd + 1, NULL, &wf, NULL, &tv);
+    fcntl(fd, F_SETFL, flags);
+    if(rc <= 0) return -1;
+    if(getsockopt(fd, SOL_SOCKET, SO_ERROR, &err, &elen) != 0) return -1;
+    return err == 0 ? 0 : -1;
 }
 
 static int send_one(int fd, const char *path, void (*progress)(unsigned)){
@@ -77,15 +108,12 @@ int send_file_loopback(const char *path, int *port_used, void (*progress)(unsign
     for(i = 0; i < sizeof SEND_PORTS/sizeof SEND_PORTS[0]; i++){
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in sa;
-        struct timeval tv = { 5, 0 };
         if(fd < 0) continue;
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
         memset(&sa, 0, sizeof sa);
         sa.sin_family = AF_INET;
         sa.sin_port = htons((uint16_t)SEND_PORTS[i]);
         sa.sin_addr.s_addr = inet_addr("127.0.0.1");
-        if(connect(fd, (struct sockaddr *)&sa, sizeof sa) < 0){
+        if(sock_connect_deadline(fd, (struct sockaddr *)&sa, sizeof sa, 5) < 0){
             close(fd);
             continue;
         }

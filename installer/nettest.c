@@ -6,11 +6,17 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <errno.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <netdb.h>
 #include <sys/time.h>
+#include <sys/select.h>
+
+/* Non-blocking connect with a hard deadline lives in send.c (shared);
+ * blocking connect ignores SNDTIMEO on filtered hosts (75 s hole). */
 
 int net_probe(const char *host, int port, int timeout_s){
     struct addrinfo hints, *res = NULL, *rp;
@@ -27,13 +33,8 @@ int net_probe(const char *host, int port, int timeout_s){
     if(getaddrinfo(host, svc, &hints, &res) != 0 || !res) return 0;
     for(rp = res; rp; rp = rp->ai_next){
         int fd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
-        struct timeval tv;
         if(fd < 0) continue;
-        tv.tv_sec = timeout_s;
-        tv.tv_usec = 0;
-        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
-        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
-        if(connect(fd, rp->ai_addr, rp->ai_addrlen) == 0) ok = 1;
+        if(sock_connect_deadline(fd, rp->ai_addr, rp->ai_addrlen, timeout_s) == 0) ok = 1;
         close(fd);
         if(ok) break;
     }
