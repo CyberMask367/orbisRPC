@@ -35,6 +35,11 @@ int ui_init(void){
         up.priority = ORBIS_KERNEL_PRIO_FIFO_LOWEST;
         (void)sceUserServiceInitialize(&up);
     }
+    /* Internal service modules first (Payload Guest boot pattern):
+     * dialogs and system calls misbehave when these aren't up. */
+    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SYSTEM_SERVICE) != 0) return -1;
+    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_USER_SERVICE) != 0) return -1;
+    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_COMMON_DIALOG) != 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0){
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);

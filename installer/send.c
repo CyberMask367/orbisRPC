@@ -13,6 +13,7 @@
 #include <sys/select.h>
 #ifdef INSTALLER_PS4
 #include <orbis/Net.h>
+#include <orbis/Sysmodule.h>
 #endif
 
 #define SEND_CHUNK (64u*1024u)
@@ -23,8 +24,9 @@ int net_init(void){
     static int done = 0;
     int probe;
     if(done) return 0;
-    /* Best-effort: the stack may already be up (re-init calls then fail
-     * harmlessly). Ground truth is a probe socket, not return codes. */
+    /* Internal NET module (Payload Guest boot pattern) + best-effort
+     * stack init. Ground truth is a probe socket, not return codes. */
+    (void)sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_NET);
     (void)sceNetInit();
     (void)sceNetPoolCreate("orbisrpc", 64*1024, 0);
     probe = socket(AF_INET, SOCK_STREAM, 0);
