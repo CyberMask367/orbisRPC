@@ -25,7 +25,8 @@ typedef struct {
                                 * large_image becomes <base><lower titleId>.png */
     char home_art[256];        /* optional: idle/home tile art. http(s) URL
                                 * (mp:-proxied) or uploaded Discord asset key.
-                                * empty = try <art_base_url>home.png, else none */
+                                * Default: project-hosted PlayStation logo.
+                                * Empty falls back to <art_base_url>home.png. */
     int n_titles;
     char title_ids[CFG_MAX_TITLES][CFG_TITLEID_LEN];
     char title_names[CFG_MAX_TITLES][CFG_TITLENAME_LEN];
