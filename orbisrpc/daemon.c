@@ -550,3 +550,4 @@ int daemon_run(const char *fixed_game_name){
     lock_release();
     log_close();
     return 0;
+}
