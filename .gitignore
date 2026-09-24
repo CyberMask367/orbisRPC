@@ -11,3 +11,11 @@ config/config.ps4.json
 plugin/build/
 tests/test_utils
 config/icons/
+
+# installer artifacts
+*.pkg
+installer/x64/
+installer/eboot.bin
+installer/pkg.gp4
+installer/sce_sys/param.sfo
+build-sdk/
