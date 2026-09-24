@@ -341,6 +341,7 @@ int daemon_run(const char *fixed_game_name){
                                     } else {
                                         log_msg("session file failed validation; starting fresh");
                                     }
+                                }
                                 jl_free(sr);
                             }
                             free(sb);
