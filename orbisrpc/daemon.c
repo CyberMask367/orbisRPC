@@ -307,7 +307,6 @@ int daemon_run(const char *fixed_game_name){
             static int sess_restored = 0;
             if(!sess_restored){
                 sess_restored = 1;
-                char sj[256];
                 FILE *sf = fopen("/data/orbisRPC/session.json", "rb");
                 if(sf){
                     fseek(sf, 0, SEEK_END);
