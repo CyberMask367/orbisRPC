@@ -17,7 +17,7 @@ INTDIR      := $(PROJDIR)/x64/Debug
 
 CFILES      := $(wildcard $(PROJDIR)/*.c)
 CPPFILES    := $(wildcard $(PROJDIR)/*.cpp)
-OBJS        := $(patsubst $(PROJDIR)/%.c, $(INTDIR)/%.o, $(CFILES)) $(patsubst $(PROJDIR)/%.cpp, $(INTDIR)/%.o, $(CPPFILES))
+OBJS        := $(patsubst $(PROJDIR)/%.c, $(INTDIR)/%.o, $(CFILES)) $(patsubst $(PROJDIR)/%.cpp, $(INTDIR)/%.o, $(CPPFILES)) $(INTDIR)/jsonlite.o
 
 # llvmshim (no brew): export PATH="$HOME/llvmshim:$PATH" before make.
 LLVM        := $(HOME)/llvmshim
@@ -37,8 +37,8 @@ all: $(CONTENT_ID).pkg
 $(CONTENT_ID).pkg: installer/pkg.gp4
 	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core pkg_build pkg.gp4 . && mv $(CONTENT_ID).pkg ..
 
-installer/pkg.gp4: installer/eboot.bin installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png $(LIBMODULES) $(ASSETS)
-	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
+installer/pkg.gp4: installer/eboot.bin installer/assets/daemon.elf installer/sce_sys/about/right.sprx installer/sce_sys/param.sfo installer/sce_sys/icon0.png $(LIBMODULES) $(ASSETS)
+	cd installer && $(TOOLCHAIN)/bin/$(CDIR)/create-gp4 -out pkg.gp4 --content-id=$(CONTENT_ID) --files "eboot.bin assets/daemon.elf sce_sys/about/right.sprx sce_sys/param.sfo sce_sys/icon0.png sce_module/libSceFios2.prx sce_module/libc.prx $(patsubst installer/%,%,$(ASSETS))"
 
 installer/sce_sys/param.sfo: installer/Makefile
 	$(TOOLCHAIN)/bin/$(CDIR)/PkgTool.Core sfo_new $@
@@ -59,6 +59,13 @@ installer/eboot.bin: $(OBJS)
 
 $(INTDIR)/%.o: $(PROJDIR)/%.c
 	$(CC) $(CFLAGS) -o $@ $<
+
+$(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c
+	$(CC) $(CFLAGS) -o $@ $<
+
+# Stage the daemon payload into the app image (built first via build_sdk.sh).
+installer/assets/daemon.elf: build-sdk/orbisrpc_sdk.elf
+	cp $< $@
 
 $(INTDIR)/%.o: $(PROJDIR)/%.cpp
 	$(CCX) $(CXXFLAGS) -o $@ $<

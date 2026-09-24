@@ -10,6 +10,8 @@
 #include "../orbisrpc/appdb.h"
 #include "../orbisrpc/discord.h"
 #include "../orbisrpc/detect.h"
+#include "../installer/icfg.h"
+#include "../installer/nettest.h"
 #include "sqlite3.h"
 #include <string.h>
 
@@ -583,6 +585,39 @@ static void test_cfg_learn(void) {
     assert(cfg_learn(&c, "CUSA00001", "Full Game") == 0);
 }
 
+static void test_installer_cfg(void) {
+    char dir[64], path[96];
+    assert(make_tmpdir(dir, sizeof dir) == 0);
+    snprintf(path, sizeof path, "%s/config.json", dir);
+    /* token validation */
+    assert(token_valid("MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz") == 1);
+    assert(token_valid("short") == 0);
+    assert(token_valid("SET_ME") == 0);
+    assert(token_valid("has space.in.it.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa") == 0);
+    assert(token_valid("nodots") == 0);
+    assert(token_valid(NULL) == 0);
+    /* save creates, preserves, round-trips */
+    assert(icfg_token_save(path, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz") == 0);
+    assert(icfg_set_str(path, "presence_state", "On PS4") == 0);
+    assert(icfg_set_int(path, "poll_interval_s", 12) == 0);
+    /* invalid token refused, file untouched */
+    assert(icfg_token_save(path, "junk") == -1);
+    char tok[160], st[64];
+    long n = 0;
+    assert(icfg_token_load(path, tok, sizeof tok) == 0);
+    assert(!strcmp(tok, "MTIz.ABCdef_0123456789-xYz.ABCDEFGHijklmnopQRSTUVwxyz"));
+    assert(icfg_get_str(path, "presence_state", st, sizeof st) == 0);
+    assert(!strcmp(st, "On PS4"));
+    assert(icfg_get_int(path, "poll_interval_s", &n) == 0 && n == 12);
+    /* missing file: loads fail soft, save still works */
+    assert(icfg_get_str("/nonexistent/x.json", "k", st, sizeof st) != 0);
+    /* net probes fail soft on garbage */
+    assert(net_probe(NULL, 443, 2) == 0);
+    assert(net_probe("", 443, 2) == 0);
+    assert(net_probe("127.0.0.1", 1, 1) == 0);
+    assert(net_probe("nonexistent.invalid", 443, 1) == 0);
+}
+
 int main(void) {
     test_json();
     test_gateway_op_spoof();
@@ -599,6 +634,7 @@ int main(void) {
     test_manifest_sig();
     test_cfg_titles();
     test_cfg_learn();
+    test_installer_cfg();
     test_appdb();
     test_discord_builder();
     puts("utility tests passed");
