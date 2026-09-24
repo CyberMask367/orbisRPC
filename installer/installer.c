@@ -37,8 +37,13 @@ static void step_inject_body(void){
     ui_progress_msg("Stopping old daemon (if any)...");
     before = file_mtime(EVICT_RESULT);
     if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
+        /* No prior result file means first-ever run (or wiped data):
+         * evict answers instantly there, so only wait briefly. An
+         * existing install gets the full grace period (clean stop is
+         * fast; a wedged holder needs the SIGKILL fallback window). */
+        int budget = (before == 0) ? 10 : 40;
         int waited = 0;
-        while(waited < 40){
+        while(waited < budget){
             sleep(2);
             waited += 2;
             if(file_mtime(EVICT_RESULT) != before) break;
