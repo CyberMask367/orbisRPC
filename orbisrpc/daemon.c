@@ -29,18 +29,27 @@
 #include <sys/stat.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <signal.h>
 #include <unistd.h>
 #include <string.h>
 #include <time.h>
 
 extern cfg_t g_cfg;
 
-static volatile int s_stop = 0;
+static volatile sig_atomic_t s_stop = 0;
 
 /* Tells a running daemon_run() to shut down (called from plugin_unload). */
 void daemon_request_stop(void){ s_stop = 1; }
 void daemon_clear_stop(void){ s_stop = 0; }
 int daemon_stop_requested(void){ return s_stop; }
+
+/* SIGTERM/SIGINT (payload managers, kill): set the flag only — the loops
+ * unwind through their normal cleanup (presence clear, session save,
+ * socket close) instead of dying mid-write. */
+static void daemon_on_signal(int sig){
+    (void)sig;
+    s_stop = 1;
+}
 
 /* Sleep up to `secs` but wake within a second when the plugin asks us to
  * stop, so plugin_unload() never hangs on a long backoff. Returns 1 stopped. */
@@ -100,11 +109,49 @@ static void ledger_append(const char *tid, const char *name,
     fclose(f);
 }
 
+/* Deterministic jitter ±20% without RNG state: hash of mono time and a
+ * counter. Keeps reconnect storms decorrelated across restarts. */
+static int backoff_jitter(int base, unsigned *ctr){
+    unsigned x = (unsigned)orbis_mono_s() * 2654435761u + (++(*ctr)) * 40503u;
+    x ^= x >> 15; x *= 0x2c1b3c6du; x ^= x >> 12;
+    int pct = 80 + (int)(x % 41); /* 80..120 */
+    return (base * pct) / 100;
+}
+
+/* Next reconnect delay: exponential from base, cap 60s for the first 10
+ * consecutive failures, then 10-minute cadence (quiet persistence, never
+ * exit). Returns the delay; bumps *fails. */
+static int reconnect_delay(int *fails, int base, unsigned *jctr){
+    int n = ++(*fails);
+    int b = base;
+    for(int i = 1; i < n && b < 60; i++) b *= 2;
+    if(b > 60) b = 60;
+    if(n > 10) b = 600;
+    return backoff_jitter(b, jctr);
+}
+
+/* Explicit presence state (logged on every transition; no ambiguous
+ * states): NONE -> HOME <-> GAME, with reconnects re-posting. */
+typedef enum { PS_NONE = 0, PS_HOME, PS_GAME } pres_state_t;
+static const char *pres_name(pres_state_t s){
+    return s == PS_GAME ? "GAME" : s == PS_HOME ? "HOME" : "NONE";
+}
+static void pres_set(pres_state_t *cur, pres_state_t next){
+    if(*cur == next) return;
+    log_msg("STATE: presence %s -> %s", pres_name(*cur), pres_name(next));
+    *cur = next;
+}
 /* fixed_game_name != NULL -> post presence for that game only, no detection.
  * NULL -> poll the foreground app like the payload daemon does.
  * Returns 0 normal stop, 1 config error, 2 auth-fatal (bad token). */
 int daemon_run(const char *fixed_game_name){
     s_stop = 0;
+#ifdef SIGTERM
+    signal(SIGTERM, daemon_on_signal);
+#endif
+#ifdef SIGINT
+    signal(SIGINT, daemon_on_signal);
+#endif
     if(mkdir(DATA_DIR, 0777) != 0){
         /* EEXIST is fine; anything else means payload can't persist config/log */
         struct stat st;
@@ -186,10 +233,18 @@ int daemon_run(const char *fixed_game_name){
 
     discord_t dc;
     int base_poll = g_cfg.poll_interval_s;
-    int64_t boot_mono = orbis_mono_s();
     if(base_poll < 5) base_poll = 5;
     if(base_poll > 60) base_poll = 60;
+    /* Reconnect policy: exponential backoff with deterministic jitter,
+     * cap 60s for the first 10 consecutive failures, then 10-minute
+     * cadence (quiet persistence, never exit). Success resets. */
     int backoff = base_poll;
+    int conn_fails = 0;
+    unsigned jctr = 0;
+    /* Health metrics (hourly HEALTH line). */
+    int64_t boot_mono = orbis_mono_s();
+    unsigned n_posts = 0, n_reconnects = 0;
+    int64_t last_health = 0;
     for(;;){ /* outer: connect cycles with backoff on failure */
         if(s_stop) break;
         /* re-read config every cycle so token edits land without a reboot.
@@ -217,11 +272,16 @@ int daemon_run(const char *fixed_game_name){
             return 2;
         }
         if(rc != 0){
-            log_msg("gateway connect failed; retry in %ds", backoff);
-            if(sleep_stop(backoff)) break;
-            backoff *= 2; if(backoff > 300) backoff = 300;
+            int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
+            log_msg("gateway connect failed (attempt %d); retry in %ds",
+                    conn_fails, wait);
+            if(sleep_stop(wait)) break;
             continue;
         }
+        if(conn_fails > 0)
+            log_msg("gateway connected after %d failures", conn_fails);
+        conn_fails = 0;
+        n_reconnects++;
         backoff = g_cfg.poll_interval_s; /* success resets backoff */
         if(backoff < 5) backoff = 5;
         if(backoff > 60) backoff = 60;
@@ -230,6 +290,7 @@ int daemon_run(const char *fixed_game_name){
          * survives gateway reconnects (same game keeps its original start).
          * A reconnect re-posts presence only when needed, timer intact. */
         static int active = 0;
+        static pres_state_t pres = PS_NONE;
         static char last[128] = "";
         static char sess_tid[16] = "";
         static int64_t started = 0;
@@ -307,6 +368,13 @@ int daemon_run(const char *fixed_game_name){
                 if(now - last_alive >= 60){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
+                }
+                /* Hourly health metrics: uptime, posts, reconnects, fails. */
+                if(now - last_health >= 3600){
+                    last_health = now;
+                    log_msg("HEALTH: %lldh uptime, %u posts, %u reconnects, %d recent fails",
+                            (long long)((now - boot_mono) / 3600),
+                            n_posts, n_reconnects, conn_fails);
                 }
                 /* A boot that survives HEALTH_STABLE_SECS of runtime was
                  * healthy: clear the unclean-boot marker so only real
@@ -397,9 +465,18 @@ int daemon_run(const char *fixed_game_name){
                     if(need_post){
                         const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
                         const char *tart = detect_last_art();
-                        discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, started);
-                        log_msg("presence: %s", last);
-                        active = 1; need_post = 0;
+                        /* Playback queue of one: only clear need_post after
+                         * the bytes actually go out. A failed send stays
+                         * queued and rides the next tick/reconnect. */
+                        int pr = discord_set_presence_ex(&dc, state, last, sess_tid[0]?sess_tid:NULL, g_cfg.application_id, g_cfg.art_base_url, tart, started);
+                        if(pr == 0){
+                            log_msg("presence: %s", last);
+                            pres_set(&pres, PS_GAME);
+                            n_posts++;
+                            active = 1; need_post = 0;
+                        } else {
+                            log_msg("presence send failed; will retry");
+                        }
                     }
                     }
                 }else if(active && !scan_unknown){
@@ -408,6 +485,7 @@ int daemon_run(const char *fixed_game_name){
                     if(++miss_hits >= 2){
                         discord_clear_presence(&dc);
                         log_msg("presence cleared");
+                        pres_set(&pres, PS_NONE);
                         ledger_append(sess_tid, last, started, time_fixed());
                         strncpy(prev_tid, sess_tid, sizeof prev_tid-1);
                         prev_started = started;
@@ -421,10 +499,15 @@ int daemon_run(const char *fixed_game_name){
                      * home presence once (instead of bare online), clear it
                      * the moment a game commits. */
                     const char *state = g_cfg.presence_state[0] ? g_cfg.presence_state : NULL;
-                    discord_set_presence_ex(&dc, state, "PlayStation 4", NULL,
-                                            g_cfg.application_id, NULL, NULL, 0);
-                    log_msg("presence: home");
-                    home_posted = 1;
+                    if(discord_set_presence_ex(&dc, state, "PlayStation 4", NULL,
+                                            g_cfg.application_id, NULL, NULL, 0) == 0){
+                        log_msg("presence: home");
+                        pres_set(&pres, PS_HOME);
+                        n_posts++;
+                        home_posted = 1;
+                    } else {
+                        log_msg("home presence send failed; will retry");
+                    }
                 }
             }
 
@@ -438,12 +521,22 @@ int daemon_run(const char *fixed_game_name){
                 log_close();
                 return 2;
             }
-            if(tr == -3){ log_msg("invalid session; fresh identify"); ws_close(&dc.ws); sleep_stop(backoff); break; }
-            if(tr != 0){
-                log_msg("gateway dropped; reconnecting");
+            if(tr == -3){
+                int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
+                log_msg("invalid session; fresh identify (attempt %d) in %ds",
+                        conn_fails, wait);
                 ws_close(&dc.ws);
-                backoff *= 2; if(backoff > 300) backoff = 300;
-                sleep_stop(backoff);
+                pres_set(&pres, PS_NONE);
+                if(sleep_stop(wait)) break;
+                break;
+            }
+            if(tr != 0){
+                int wait = reconnect_delay(&conn_fails, base_poll, &jctr);
+                log_msg("gateway dropped (attempt %d); reconnecting in %ds",
+                        conn_fails, wait);
+                ws_close(&dc.ws);
+                pres_set(&pres, PS_NONE);
+                if(sleep_stop(wait)) break;
                 break;
             }
 
@@ -452,6 +545,9 @@ int daemon_run(const char *fixed_game_name){
         if(s_stop && dc.connected) discord_clear_presence(&dc);
         ws_close(&dc.ws);
     }
+    /* Session file already reflects the live session (saved on every
+     * transition), so shutdown is: clear presence (above), release the
+     * lock so a successor starts immediately, close the log. */
+    lock_release();
     log_close();
     return 0;
-}

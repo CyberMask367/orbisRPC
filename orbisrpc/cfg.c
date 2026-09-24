@@ -28,8 +28,16 @@ void cfg_defaults(cfg_t *c) {
 
 /* keep the daemon sane if the user puts junk in config */
 static void clamp_cfg(cfg_t *c){
-    if(c->poll_interval_s < 5)  c->poll_interval_s = 5;
-    if(c->poll_interval_s > 300) c->poll_interval_s = 300;
+    if(c->poll_interval_s < 5){
+        log_msg("config: poll_interval_s %d too small; using 5", c->poll_interval_s);
+        c->poll_interval_s = 5;
+    }
+    if(c->poll_interval_s > 300){
+        log_msg("config: poll_interval_s %d too large; using 300", c->poll_interval_s);
+        c->poll_interval_s = 300;
+    }
+    if(c->token[0] && !strcmp(c->token, "SET_ME"))
+        log_msg("config: token is still the SET_ME placeholder");
 }
 
 int cfg_load(const char *path, cfg_t *c) {

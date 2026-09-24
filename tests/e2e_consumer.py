@@ -61,6 +61,15 @@ check("art/table-generated", "ORBISRPC_ART_TABLE_N" in src("orbisrpc/art_table.h
 # 8. home + rest handling
 check("home/presence", "presence: home" in d)
 check("rest/wake-detect", "likely Rest Mode" in d)
+check("shutdown/signals", "daemon_on_signal" in d and "lock_release" in d)
+check("shutdown/session-persisted", "session.json" in d)
+check("reconnect/jitter-attempts", "reconnect_delay" in d and "attempt %d" in d)
+check("reconnect/never-exits", "600" in d and "quiet persistence" in d)
+check("metrics/hourly", "HEALTH:" in d)
+check("queue/failed-post-retries", "will retry" in d)
+check("state/explicit", "pres_set" in d and "STATE: presence" in d)
+check("art/disk-cache", "artwork_cache.json" in src("orbisrpc/art.c"))
+check("cfg/schema-save-checked", "cfg_save" in d and "unwritable" in d)
 # 9. signed updates, no unsigned fallback
 upd = src("orbisrpc/updater.c")
 check("update/manifest-required", "manifest" in upd.lower())
