@@ -76,4 +76,4 @@ $(INTDIR)/%.o: $(PROJDIR)/%.cpp
 	$(CCX) $(CXXFLAGS) -o $@ $<
 
 clean:
-	rm -rf $(INTDIR) eboot.bin pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo
+	rm -rf $(INTDIR) installer/eboot.bin installer/pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo installer/assets/daemon.elf installer/assets/evict.elf
