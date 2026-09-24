@@ -46,7 +46,14 @@ static int sntp_once(const char *host){
     setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof tv);
     setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof tv);
     int ok = -1;
-    if(sendto(fd, pkt, sizeof pkt, 0, res->ai_addr, res->ai_addrlen) == (int)sizeof pkt){
+    /* Connect the UDP socket: recv() then only accepts the peer we
+     * queried, instead of any spoofed datagram on the LAN. */
+    if(connect(fd, res->ai_addr, res->ai_addrlen) != 0){
+        freeaddrinfo(res);
+        close(fd);
+        return -1;
+    }
+    if(send(fd, pkt, sizeof pkt, 0) == (int)sizeof pkt){
         unsigned char rep[48];
         ssize_t n = recv(fd, (char *)rep, sizeof rep, 0);
         if(n >= 48){
@@ -54,7 +61,10 @@ static int sntp_once(const char *host){
             memcpy(&tx, rep + 40, 4);
             tx = ((tx & 0xff) << 24) | ((tx & 0xff00) << 8) |
                  ((tx & 0xff0000) >> 8) | ((tx & 0xff000000) >> 24);
-            if(tx > NTP_EPOCH_OFFSET + 1700000000u){
+            /* Sanity window Nov 2023..Dec 2034 (uint32 NTP wraps 2036):
+             * a broken/malicious server cannot fling our clock. */
+            if(tx > NTP_EPOCH_OFFSET + 1700000000u &&
+               tx < NTP_EPOCH_OFFSET + 2050000000u){
                 int64_t ntp_unix = (int64_t)(tx - NTP_EPOCH_OFFSET);
                 s_offset = ntp_unix - (int64_t)time(NULL);
                 s_synced = 1;

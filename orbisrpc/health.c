@@ -140,7 +140,8 @@ int health_rollback(const char *path){
     FILE *f = fopen(bak, "rb");
     if(!f) return -1;
     fclose(f);
-    remove(path);
+    /* Atomic replace: never remove(path) first (a failed second step
+     * would leave no bootable binary at all). */
     if(rename(bak, path) != 0) return -1;
     return health_check_binary(path) ? 0 : -1;
 }
