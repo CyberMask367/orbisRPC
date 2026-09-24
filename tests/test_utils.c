@@ -68,6 +68,8 @@ static void test_json_oom_safe(void) {    assert(jl_parse("true", 4) != NULL);
     /* incomplete pair must fail cleanly, no leak/crash */
     assert(jl_parse("{\"a\":", 5) == NULL);
     assert(jl_parse("{\"a\":1", 6) == NULL);
+    /* oversize input refused before any allocation */
+    assert(jl_parse("[]", 5u*1024u*1024u) == NULL);
 }
 static void test_json_hostile(void) {
     /* 200-deep nesting must be rejected, not stack-smash */

@@ -152,6 +152,10 @@ static jl_val_t *parse_value(jl_parse_t *p){ return parse_value_depth(p, 0); }
 
 jl_val_t *jl_parse(const char *s, size_t len){
     if(!s) return NULL;
+    /* Input cap: no legitimate input here exceeds it (gateway frames,
+     * manifests, configs are KBs); unbounded input means unbounded
+     * allocation inside parse_string's doubling buffer. */
+    if(len > 4u*1024u*1024u) return NULL;
     size_t l = len;
     jl_parse_t p={s,s+l,0};
     jl_val_t *v=parse_value(&p);
