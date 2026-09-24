@@ -322,16 +322,24 @@ static char s_last_art[256] = "";
 static char s_rs_tid[16] = "";
 static char s_rs_name[128] = "";
 static char s_rs_art[256] = "";
+/* Raw-ID (unresolved) entries are retried, not frozen: a transient miss
+ * (slow I/O at launch) must not lock the raw ID in forever. Successful
+ * resolves reuse indefinitely; raw fallbacks re-resolve after 5 min. */
+static int s_rs_ok = 0;
+static int64_t s_rs_at = 0;
 static int resolve_reuse(const char *ti, char *out_name, size_t cap){
     if(!ti || !ti[0] || strcmp(ti, s_rs_tid) != 0 || !s_rs_name[0]) return 0;
+    if(!s_rs_ok && orbis_mono_s() - s_rs_at > 300) return 0;
     strncpy(out_name, s_rs_name, cap - 1);
     out_name[cap - 1] = 0;
     strncpy(s_last_art, s_rs_art, sizeof s_last_art - 1);
     s_last_art[sizeof s_last_art - 1] = 0;
     return 1;
 }
-static void resolve_remember(const char *ti, const char *name, const char *art){
+static void resolve_remember(const char *ti, const char *name, const char *art, int ok){
     if(!ti || !name) return;
+    s_rs_ok = ok;
+    s_rs_at = orbis_mono_s();
     strncpy(s_rs_tid, ti, sizeof s_rs_tid - 1);
     s_rs_tid[sizeof s_rs_tid - 1] = 0;
     strncpy(s_rs_name, name, sizeof s_rs_name - 1);
@@ -521,7 +529,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
             } else s_last_art[0] = 0;
         }
         if(!named){ strncpy(out_name, titleId, cap-1); out_name[cap-1]=0; }
-        resolve_remember(titleId, out_name, s_last_art);
+        resolve_remember(titleId, out_name, s_last_art, named);
     }else{
         remember_titleid("");
         s_last_art[0] = 0;
@@ -544,20 +552,20 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     }
     /* Game-process-safe only: small reads plus one bounded network
      * lookup; no multi-megabyte scans anywhere in this codebase. */
-    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, ""); return 0; }
+    if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
-    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, ""); return 0; }
-    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); resolve_remember(titleId, out_name, ""); return 0; }
+    if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
+    if(appxml_title(titleId, out_name, cap)==0){ log_msg("name: %s via appxml", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
     {
         char art[256] = "";
         if(tmdb_resolve(titleId, out_name, cap, art, sizeof art)==0){
             strncpy(s_last_art, art, sizeof s_last_art-1);
-            resolve_remember(titleId, out_name, art);
+            resolve_remember(titleId, out_name, art, 1);
             return 0; /* tmdb_resolve already logged */
         }
         s_last_art[0] = 0;
     }
     strncpy(out_name, titleId, cap-1); out_name[cap-1]=0;
-    resolve_remember(titleId, out_name, "");
+    resolve_remember(titleId, out_name, "", 0);
     return 0;
 }
