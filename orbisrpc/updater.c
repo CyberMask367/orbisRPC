@@ -283,7 +283,13 @@ static int stage_file(const char *target, const unsigned char *data, size_t n){
 /* SHA256 of a buffer, hex-encoded (64 chars + NUL). Returns 0 on success. */
 static int sha256_hex(const unsigned char *data, size_t n, char out[65]){
     unsigned char dig[32];
-    if(mbedtls_sha256(data, n, dig, 0) != 0) return -1;
+    mbedtls_sha256_context sc;
+    mbedtls_sha256_init(&sc);
+    int ok = mbedtls_sha256_starts(&sc, 0) == 0 &&
+             mbedtls_sha256_update(&sc, data ? data : (const unsigned char *)"", n) == 0 &&
+             mbedtls_sha256_finish(&sc, dig) == 0;
+    mbedtls_sha256_free(&sc);
+    if(!ok) return -1;
     for(int i=0;i<32;i++) snprintf(out+2*i, 3, "%02x", dig[i]);
     out[64]=0;
     return 0;
