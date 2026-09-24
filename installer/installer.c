@@ -162,6 +162,7 @@ static void step_tweaks(void){
 int main(void){
     char tok[160];
     int first_run;
+    if(ui_init() != 0) return 1; /* no dialogs possible; exit, don't crash */
     tok[0] = 0;
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
     first_run = !token_valid(tok);

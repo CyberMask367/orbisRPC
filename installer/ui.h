@@ -3,6 +3,11 @@
 #define INSTALLER_UI_H
 #include <stddef.h>
 
+/* Must run once before any dialog: loads MsgDialog/ImeDialog sysmodules
+ * and inits CommonDialog. Calling dialogs without this panics the box
+ * (unloaded-sysmodule call at startup). 0 ok, -1 fatal. */
+int ui_init(void);
+
 /* Info dialog with OK. 0 shown, -1 failed to open. */
 int ui_ok(const char *msg);
 /* Yes/No dialog, focus on No (safe default). 1 yes, 0 no/closed, -1 error. */

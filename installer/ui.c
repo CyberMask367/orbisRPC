@@ -21,6 +21,17 @@ static void base_init(OrbisMsgDialogParam *param){
     param->mode = ORBIS_MSG_DIALOG_MODE_USER_MSG;
 }
 
+static int ui_ready = 0;
+
+int ui_init(void){
+    if(ui_ready) return 0;
+    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
+    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0) return -1;
+    if(sceCommonDialogInitialize() < 0) return -1;
+    ui_ready = 1;
+    return 0;
+}
+
 int ui_ok(const char *msg){
     OrbisMsgDialogParam param;
     OrbisMsgDialogUserMessageParam um;
