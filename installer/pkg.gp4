@@ -3,7 +3,7 @@
 	<volume>
 		<volume_type>pkg_ps4_app</volume_type>
 		<volume_id>PS4VOLUME</volume_id>
-		<volume_ts>2026-09-24 16:43:31</volume_ts>
+		<volume_ts>2026-09-24 16:46:48</volume_ts>
 		<package content_id="IV0000-ORPC00001_00-ORBISRPCSETUP000" passcode="00000000000000000000000000000000"
 			storage_type="digital50" app_type="full" />
 		<chunk_info chunk_count="1" scenario_count="1">
@@ -18,6 +18,7 @@
 	<files img_no="0">
 		<file targ_path="eboot.bin" orig_path="eboot.bin" />
 		<file targ_path="assets/daemon.elf" orig_path="assets/daemon.elf" />
+		<file targ_path="assets/evict.elf" orig_path="assets/evict.elf" />
 		<file targ_path="sce_sys/about/right.sprx" orig_path="sce_sys/about/right.sprx" />
 		<file targ_path="sce_sys/param.sfo" orig_path="sce_sys/param.sfo" />
 		<file targ_path="sce_sys/icon0.png" orig_path="sce_sys/icon0.png" />

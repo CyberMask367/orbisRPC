@@ -7,22 +7,48 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
+#include <unistd.h>
+#include <sys/stat.h>
 #include "ui.h"
 #include "send.h"
 #include "icfg.h"
 #include "nettest.h"
 
 #define DAEMON_ELF "/app0/assets/daemon.elf"
+#define EVICT_ELF "/app0/assets/evict.elf"
+#define EVICT_RESULT "/data/orbisRPC/evict.txt"
+
+static long file_mtime(const char *p){
+    struct stat st;
+    return (stat(p, &st) == 0) ? (long)st.st_mtime : 0;
+}
 
 static void step_inject_body(void){
     int port = 0;
+    long before;
+    char msg[160];
     if(ui_progress_open("Injecting orbisRPC...") != 0){
         ui_ok("Could not open progress dialog. Continuing.");
         return;
     }
+    /* Rotate first: a running daemon holds the single-instance lock and
+     * would stand a fresh inject down. Evict exits instantly when nothing
+     * runs, so this is zero-harm in every case. */
+    ui_progress_msg("Stopping old daemon (if any)...");
+    before = file_mtime(EVICT_RESULT);
+    if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
+        int waited = 0;
+        while(waited < 40){
+            sleep(2);
+            waited += 2;
+            if(file_mtime(EVICT_RESULT) != before) break;
+            snprintf(msg, sizeof msg, "Stopping old daemon... (%ds)", waited);
+            ui_progress_msg(msg);
+        }
+    }
+    ui_progress_msg("Injecting orbisRPC...");
     ui_progress_set(0);
     if(send_file_loopback(DAEMON_ELF, &port, ui_progress_set) == 0){
-        char msg[128];
         ui_progress_close();
         snprintf(msg, sizeof msg, "Daemon injected via loader port %d.\n\nIt boots on its own from here.", port);
         ui_ok(msg);
