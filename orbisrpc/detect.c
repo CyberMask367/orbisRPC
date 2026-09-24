@@ -22,6 +22,7 @@
 #include "log.h"
 #include "sfo.h"
 #include "tmdb.h"
+#include "clock.h"
 #ifdef ORBISRPC_SDK_PAYLOAD
 /* Payload-SDK build: dlopen/dlsym come from the SDK libc (dlfcn);
  * there is no UserService here — user_init() below degrades. */
@@ -159,7 +160,6 @@ static long scan_newest_save(char *out, size_t cap){    static const char *users
             if(strlen(e->d_name) != 9 || !is_title_prefix(e->d_name)) continue;
             char tp[160];
             snprintf(tp, sizeof tp, "%s/%s", spath, e->d_name);
-            struct stat st;
             /* newest write inside the title dir wins */
             DIR *td = opendir(tp);
             long tb = -1;
