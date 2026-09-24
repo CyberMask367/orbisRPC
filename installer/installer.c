@@ -29,8 +29,11 @@ static int copy_file(const char *src, const char *dst){
     FILE *in, *out;
     static unsigned char buf[65536];
     size_t n;
+    long expect = -1, got;
+    struct stat st;
     in = fopen(src, "rb");
     if(!in) return -1;
+    if(fstat(fileno(in), &st) == 0) expect = (long)st.st_size;
     out = fopen(dst, "wb");
     if(!out){ fclose(in); return -1; }
     while((n = fread(buf, 1, sizeof buf, in)) > 0){
@@ -38,7 +41,10 @@ static int copy_file(const char *src, const char *dst){
     }
     fclose(in);
     if(fclose(out) != 0) return -1;
-    return 0;
+    /* Read-back proof: a short write must never pass as installed. */
+    if(expect > 0 && stat(dst, &st) == 0) got = (long)st.st_size;
+    else got = -1;
+    return (expect > 0 && got == expect) ? 0 : -1;
 }
 
 /* mkdir -p (parents as needed). 0 ok or already there. */

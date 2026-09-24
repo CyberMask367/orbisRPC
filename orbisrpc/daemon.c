@@ -378,6 +378,21 @@ int daemon_run(const char *fixed_game_name){
                     last_alive = now;
                     log_msg("alive: %s", active ? last : "idle");
                 }
+                /* State reconciliation: re-post current presence every
+                 * 15 min so a silently desynced tile (dropped update,
+                 * stale cache, missed reconnect) heals itself without
+                 * any state change. Timer/source values are re-read at
+                 * post time, so this never disturbs a live session. */
+                {
+                    static int64_t last_reconcile = 0;
+                    if(last_reconcile == 0) last_reconcile = now;
+                    if(now - last_reconcile >= 900){
+                        last_reconcile = now;
+                        if(active && last[0]) need_post = 1;
+                        else home_posted = 0;
+                        log_msg("reconcile: reposting current state");
+                    }
+                }
                 /* Hourly health metrics: uptime, posts, reconnects, fails. */
                 if(now - last_health >= 3600){
                     last_health = now;

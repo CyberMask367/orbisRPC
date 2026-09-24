@@ -28,7 +28,7 @@ int net_probe(const char *host, int port, int timeout_s){
     if(timeout_s > 10) timeout_s = 10;
     snprintf(svc, sizeof svc, "%d", port);
     memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC;
+    hints.ai_family = AF_INET; /* v4 only: deterministic on console stacks */
     hints.ai_socktype = SOCK_STREAM;
     if(getaddrinfo(host, svc, &hints, &res) != 0 || !res) return 0;
     for(rp = res; rp; rp = rp->ai_next){

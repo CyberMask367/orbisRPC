@@ -69,7 +69,8 @@ int sock_connect_deadline(int fd, const struct sockaddr *sa, socklen_t len, int 
 
 static int send_one(int fd, const char *path, void (*progress)(unsigned)){
     FILE *f = fopen(path, "rb");
-    unsigned char buf[SEND_CHUNK];
+    /* Static, not stack: 64 KB is a real fraction of an app thread stack. */
+    static unsigned char buf[SEND_CHUNK];
     long total = 0, sent = 0;
     size_t n;
     if(!f) return -1;

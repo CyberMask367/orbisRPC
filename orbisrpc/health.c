@@ -101,12 +101,14 @@ int health_boot_note_crash(void){
     dirty_path(dp, sizeof dp);
     int unclean = path_exists(dp);
     int n = read_count();
+    /* Marker first, count second: a crash between the two still leaves
+     * the marker behind, so the death is counted next boot instead of
+     * being lost. */
+    write_dirty();
     if(unclean){
         n += 1;
         write_count(n);
     }
-    /* else: previous boot was clean -> counter stays (normally 0). */
-    write_dirty();
     return n >= SAFE_THRESHOLD ? 1 : 0;
 }
 
