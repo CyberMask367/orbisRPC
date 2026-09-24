@@ -355,14 +355,6 @@ int daemon_run(const char *fixed_game_name){
             int64_t now = orbis_mono_s();
             if(now - last_tsync >= 3600){ last_tsync = now; time_sync(); }
             if(now != last_poll){
-                /* Sleep/wake detection without a suspend API: if the loop
-                 * itself froze (Rest Mode), mono jumps and heartbeats died.
-                 * Log it and force a re-post so presence resumes cleanly. */
-                if(last_poll != 0 && now - last_poll > 120){
-                    log_msg("wake: loop was frozen %llds (likely Rest Mode); resuming",
-                            (long long)(now - last_poll));
-                    need_post = active && last[0];
-                }
                 last_poll = now;
                 if(now - last_alive >= 60){
                     last_alive = now;
