@@ -257,7 +257,10 @@ int discord_set_presence_ex(discord_t *d, const char *state, const char *name,
         jl_obj_set(act,"type",jl_new_int(atype)); /* 0 Playing */
     }
     if(state&&state[0]) jl_obj_set(act,"state",jl_new_string(state));
-    if(title_id&&title_id[0]) jl_obj_set(act,"details",jl_new_string(title_id));
+    /* details intentionally mirrors the human-readable name, never the raw
+     * title ID: sending the ID here renders it as a second line under the
+     * game name (and twice when the name itself fell back to the ID).
+     * title_id is still used for media-type lookup and artwork below. */
     if(started_epoch>0){
         jl_val_t *ts=jl_new_object();
         if(!ts){ jl_free(act); return -1; }

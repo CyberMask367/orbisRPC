@@ -425,6 +425,20 @@ static int pronunc_title(const char *titleId, char *out, size_t cap){
  * console with zero setup. Returns 0 on success. */
 static int sfo_file_title(const char *titleId, char *out, size_t cap){
     char path[256];
+    /* Running game's own sandbox mount first: the payload process can
+     * already list /mnt/sandbox (that is where the title ID comes from),
+     * and the live mount carries the game's own sce_sys/param.sfo with
+     * its TITLE field. Fails soft when untraversable. */
+    if(titleId && titleId[0]){
+        snprintf(path, sizeof path, "/mnt/sandbox/%s_000/sce_sys/param.sfo", titleId);
+        int sfd = open(path, O_RDONLY);
+        if(sfd >= 0){
+            unsigned char buf[4096];
+            ssize_t n = read(sfd, buf, sizeof buf);
+            close(sfd);
+            if(n > 0 && sfo_title(buf, (size_t)n, out, cap) == 0) return 0;
+        }
+    }
     const char *fixed[] = { "app0/sce_sys/param.sfo", "/app0/sce_sys/param.sfo", NULL };
     for(int i = 0; fixed[i]; i++){
         int fd = open(fixed[i], O_RDONLY);

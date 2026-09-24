@@ -7,6 +7,10 @@ jobs:
       - uses: actions/checkout@v4
       - name: host unit tests
         run: make -C tests clean && make -C tests test
+      - name: ASan/UBSan
+        run: make -C tests asan
+      - name: e2e contracts
+        run: python3 tests/e2e_consumer.py
   sdk-payload:
     runs-on: ubuntu-latest
     steps:
