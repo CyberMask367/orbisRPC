@@ -7,4 +7,8 @@
 /* progress(pct) may be NULL. Returns 0 + port_used set on success. */
 int send_file_loopback(const char *path, int *port_used, void (*progress)(unsigned pct));
 
+/* One-time network stack init (sceNetInit + pool). 0 ready, -1 dead.
+ * No-op returning 0 on host test builds. Safe to call repeatedly. */
+int net_init(void);
+
 #endif

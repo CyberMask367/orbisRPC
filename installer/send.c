@@ -10,9 +10,23 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <sys/time.h>
+#ifdef INSTALLER_PS4
+#include <orbis/Net.h>
+#endif
 
 #define SEND_CHUNK (64u*1024u)
 static const int SEND_PORTS[] = { 9090, 9021, 9020 };
+
+int net_init(void){
+#ifdef INSTALLER_PS4
+    static int done = 0;
+    if(done) return 0;
+    if(sceNetInit() < 0) return -1;
+    if(sceNetPoolCreate("orbisrpc", 64*1024, 0) < 0) return -1;
+    done = 1;
+#endif
+    return 0;
+}
 
 static int send_one(int fd, const char *path, void (*progress)(unsigned)){
     FILE *f = fopen(path, "rb");
@@ -47,6 +61,7 @@ static int send_one(int fd, const char *path, void (*progress)(unsigned)){
 int send_file_loopback(const char *path, int *port_used, void (*progress)(unsigned)){
     unsigned i;
     if(!path || !path[0]) return -1;
+    if(net_init() != 0) return -1; /* no stack, no sockets: fail, don't crash */
     for(i = 0; i < sizeof SEND_PORTS/sizeof SEND_PORTS[0]; i++){
         int fd = socket(AF_INET, SOCK_STREAM, 0);
         struct sockaddr_in sa;

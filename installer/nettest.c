@@ -2,6 +2,7 @@
  * both read as unreachable; that honesty is the point (Sony TMDB from
  * the console genuinely fails while Discord succeeds). */
 #include "nettest.h"
+#include "send.h"
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
@@ -16,6 +17,7 @@ int net_probe(const char *host, int port, int timeout_s){
     char svc[8];
     int ok = 0;
     if(!host || !host[0] || port <= 0 || port > 65535) return 0;
+    if(net_init() != 0) return 0; /* stack dead: everything unreachable */
     if(timeout_s < 1) timeout_s = 1;
     if(timeout_s > 10) timeout_s = 10;
     snprintf(svc, sizeof svc, "%d", port);

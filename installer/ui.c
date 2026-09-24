@@ -27,6 +27,7 @@ int ui_init(void){
     if(ui_ready) return 0;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0) return -1;
+    if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_BACKEND) < 0) return -1;
     if(sceCommonDialogInitialize() < 0) return -1;
     ui_ready = 1;
     return 0;

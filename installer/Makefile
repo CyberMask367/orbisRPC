@@ -26,7 +26,7 @@ CCX         := $(LLVM)/clang++
 LD          := $(LLVM)/ld.lld
 CDIR        := macos
 
-CFLAGS      := --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include -Iorbisrpc -Iinstaller
+CFLAGS      := -DINSTALLER_PS4 --target=x86_64-pc-freebsd12-elf -fPIC -funwind-tables -c -isysroot $(TOOLCHAIN) -isystem $(TOOLCHAIN)/include -Iorbisrpc -Iinstaller
 CXXFLAGS    := $(CFLAGS) -isystem $(TOOLCHAIN)/include/c++/v1
 LDFLAGS     := -m elf_x86_64 -pie --script $(TOOLCHAIN)/link.x --eh-frame-hdr -L$(TOOLCHAIN)/lib $(LIBS) $(TOOLCHAIN)/lib/crt1.o -L$(TOOLCHAIN)/lib
 
