@@ -322,16 +322,25 @@ int daemon_run(const char *fixed_game_name){
                                 const jl_val_t *s2 = jl_obj_get(sr, "started");
                                 if(t && t->type == JL_STRING && t->str &&
                                    s2 && s2->type == JL_NUMBER){
-                                    strncpy(prev_tid, t->str, sizeof prev_tid-1);
-                                    prev_started = (int64_t)s2->num;
-                                    /* Wall saved_at can't mix with the
-                                     * monotonic resume window: start the
-                                     * window at boot. Same title seen
-                                     * within minutes of boot resumes. */
-                                    prev_end = orbis_mono_s();
-                                    log_msg("session restored: %s (timer may resume)",
-                                            prev_tid);
-                                }
+                                    /* Validate before trusting: 9-char id,
+                                     * sane epoch (2020-2100). A corrupt file
+                                     * must never seed a bogus timer. */
+                                    int64_t st = (int64_t)s2->num;
+                                    if(strlen(t->str) == 9 &&
+                                       st >= 1577836800LL &&
+                                       st <= 4102444800LL){
+                                        strncpy(prev_tid, t->str, sizeof prev_tid-1);
+                                        prev_started = st;
+                                        /* Wall saved_at can't mix with the
+                                         * monotonic resume window: start the
+                                         * window at boot. Same title seen
+                                         * within minutes of boot resumes. */
+                                        prev_end = orbis_mono_s();
+                                        log_msg("session restored: %s (timer may resume)",
+                                                prev_tid);
+                                    } else {
+                                        log_msg("session file failed validation; starting fresh");
+                                    }
                                 jl_free(sr);
                             }
                             free(sb);
