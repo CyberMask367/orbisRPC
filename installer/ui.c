@@ -10,8 +10,16 @@
 #include <orbis/ImeDialog.h>
 #include <orbis/UserService.h>
 #include <orbis/Sysmodule.h>
+#include <orbis/Pad.h>
 #include <orbis/libkernel.h>
 #include <orbis/_types/user.h>
+#include <fcntl.h>
+#include <unistd.h>
+
+static void ime_dbg(const char *msg){
+    int fd = open("/data/ime_debug.log", O_WRONLY|O_CREAT|O_APPEND, 0666);
+    if(fd >= 0){ write(fd, msg, strlen(msg)); close(fd); }
+}
 
 static void base_init(OrbisMsgDialogParam *param){
     memset(param, 0, sizeof(*param));
@@ -23,6 +31,7 @@ static void base_init(OrbisMsgDialogParam *param){
 }
 
 static int ui_ready = 0;
+static int ime_dialog_running = 0;
 
 int ui_init(void){
     if(ui_ready) return 0;
@@ -39,6 +48,8 @@ int ui_init(void){
      * dialogs and system calls misbehave when these aren't up. */
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SYSTEM_SERVICE) != 0) return -1;
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_USER_SERVICE) != 0) return -1;
+    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD) != 0) return -1;
+    (void)scePadInit();
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_COMMON_DIALOG) != 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0){
@@ -74,7 +85,7 @@ int ui_ok(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
-    reap_stale();
+    sceMsgDialogTerminate();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
@@ -97,14 +108,17 @@ int ui_confirm(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
-    reap_stale();
+    sceMsgDialogTerminate();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
-    /* Always return X as confirm, O as back: the dialog's
-     * fixed layout treats Circle as confirm, so invert the id. */
-    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO;
+    /* Use the official OpenOrbis sample pattern (YESNO_FOCUS_NO).
+     * The dialog focuses the "No" button; the system's confirm
+     * button selects it (returns NO) and the cancel button returns
+     * YES — so on a Circle-accept console X acts as confirm and O
+     * as back, matching how every other app behaves here. */
+    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO_FOCUS_NO;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
     while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED)
@@ -112,7 +126,7 @@ int ui_confirm(const char *msg){
     sceMsgDialogClose();
     sceMsgDialogGetResult(&res);
     sceMsgDialogTerminate();
-    return (res.buttonId == ORBIS_MSG_DIALOG_BUTTON_ID_NO) ? 1 : 0;
+    return res.buttonId == ORBIS_MSG_DIALOG_BUTTON_ID_YES;
 }
 
 static int progress_open = 0;
@@ -125,6 +139,7 @@ int ui_progress_open(const char *msg){
          * leaves the flag set with no dialog behind it. Reclaim it. */
         ui_progress_close();
     }
+    sceMsgDialogTerminate();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     param.mode = ORBIS_MSG_DIALOG_MODE_PROGRESS_BAR;
@@ -157,7 +172,6 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     static wchar_t wtitle[64];
     static wchar_t wplace[64];
     OrbisImeDialogSetting st;
-    OrbisDialogResult res;
     int32_t uid = 0;
     size_t i;
     if(!out || cap == 0 || cap > 200) return -1;
@@ -188,27 +202,40 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     st.verticalAlignment = ORBIS_V_CENTER;
     st.placeholder = wplace;
     st.title = wtitle;
-    reap_stale();
-    if(sceImeDialogInit(&st, NULL) < 0) return -1;
-    /* Pump until the OSK stops (IME uses its own status enum). Bounded:
-     * a dialog stuck in NONE (failed init we couldn't see) aborts instead
-     * of hanging the installer forever. */
+    /* apollo-ps4 pattern: guard against re-entry, terminate stale
+     * state, then init. The dialog owns the running flag. */
+    if(ime_dialog_running){ sceImeDialogTerm(); ime_dialog_running = 0; }
+    ime_dbg("ime_begin\n");
+    if(sceImeDialogInit(&st, NULL) < 0){ ime_dbg("ime_init_fail\n"); return -1; }
+    ime_dialog_running = 1;
     {
         int spins = 0;
         OrbisDialogStatus ds;
-        while((ds = sceImeDialogGetStatus()) != ORBIS_DIALOG_STATUS_STOPPED){
-            if(ds == ORBIS_DIALOG_STATUS_NONE && ++spins > 250){
+        ds = sceImeDialogGetStatus();
+        if(ds == ORBIS_DIALOG_STATUS_RUNNING) ime_dbg("ime_status_running\n");
+        else if(ds == ORBIS_DIALOG_STATUS_NONE) ime_dbg("ime_status_none\n");
+        else if(ds == ORBIS_DIALOG_STATUS_STOPPED) ime_dbg("ime_status_stopped\n");
+        while(ime_dialog_running){
+            ds = sceImeDialogGetStatus();
+            if(ds == ORBIS_DIALOG_STATUS_STOPPED){
+                OrbisDialogResult res;
+                memset(&res, 0, sizeof res);
+                sceImeDialogGetResult(&res);
                 sceImeDialogTerm();
+                ime_dialog_running = 0;
+                if(res.endstatus != ORBIS_DIALOG_OK) return 0;
+                break;
+            }
+            if(ds == ORBIS_DIALOG_STATUS_NONE && ++spins > 250){
+                ime_dbg("ime_timeout\n");
+                sceImeDialogTerm();
+                ime_dialog_running = 0;
                 return -1;
             }
             if(ds != ORBIS_DIALOG_STATUS_NONE) spins = 0;
             sceKernelUsleep(20000);
         }
     }
-    memset(&res, 0, sizeof res);
-    if(sceImeDialogGetResult(&res) < 0){ sceImeDialogTerm(); return -1; }
-    sceImeDialogTerm();
-    if(res.endstatus != ORBIS_DIALOG_OK) return 0;
     for(i = 0; i < cap - 1 && wbuf[i]; i++)
         out[i] = (wbuf[i] < 128 && wbuf[i] >= 32) ? (char)wbuf[i] : '?';
     out[i] = 0;

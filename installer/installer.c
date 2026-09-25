@@ -3,8 +3,8 @@
  * One confirm up front; everything after flows forward.
  *
  * Payload placement is the whole job: one copy of orbisrpc.bin into
- * /data/GoldHEN/bin/elf. Booting it is GoldHEN's payload menu (or
- * AutoRun), never this app - an installer that also injects fails in
+ * /data/payloads. Booting it is the payload launcher reading
+ * /data/payloads, never this app - an installer that also injects fails in
  * ways the user cannot fix from the wizard. */
 #include <stdio.h>
 #include <string.h>
@@ -27,8 +27,8 @@
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
-/* The one place the payload lives: GoldHEN's bin/elf loader directory. */
-#define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
+/* The one place the payload lives: the payload launcher directory. */
+#define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -223,14 +223,14 @@ static int step_files(void){
     int ok = -1;
     int mk = -1;
     mkdir(INST_DIR, 0777);
-    mk = mkdirs("/data/GoldHEN/bin/elf");
+    mk = mkdirs("/data/payloads");
     ilog("mkdirs", mk == 0 ? 0 : errno, -1, -1);
     if(mk == 0)
         ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     snprintf(report, sizeof report,
              "Daemon payload:\n%s : %s%s%s%s\n\n"
-             "Start it from GoldHEN's payload menu (bin/elf), or enable\n"
-             "AutoRun for orbisrpc once and it boots with every jailbreak.",
+             "Start it from the payload launcher (/data/payloads)\n"
+             "and pick orbisrpc.",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
              ok == 0 ? "" : " [stage ",
              ok == 0 ? "" : g_stage,
@@ -325,34 +325,23 @@ static void finish(int code){
 }
 
 int main(void){
-    int q;
     char welcome[256];
     crash_guard();
     if(ui_init() != 0) finish(1);
-    /* The system holds a splash screen over fresh apps: dialogs opened
-     * under it get auto-dismissed (the half-second flash) or never
-     * surface. Hide it once the UI layer is ready, then let the
-     * foreground transition settle before the first dialog. */
+    /* Dismiss the PS4 splash so dialogs aren't auto-dismissed
+     * (the half-second flash) or never surface. No sleep needed. */
     sceSystemServiceHideSplashScreen();
-    sceKernelSleep(3);
     snprintf(welcome, sizeof welcome,
              "orbisRPC Setup %s\n\nInstalls the daemon payload and saves your Discord token.",
              SETUP_VERSION);
-    q = ui_confirm(welcome);
-    if(q != 1){
-        /* Declined install: offer status, then exit. Forward only. */
-        if(ui_confirm("Show daemon status instead?") == 1)
-            step_status();
-        finish(0);
-    }
+    ui_ok(welcome);
     if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) finish(1);
     step_token();
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
-          "The payload is in GoldHEN's bin/elf. To start it, open GoldHEN's\n"
-          "payload menu and pick orbisrpc, or enable AutoRun for it once\n"
-          "so it starts on every jailbreak.");
+          "The payload is in /data/payloads. To start it, open the\n"
+          "payload launcher and pick orbisrpc.");
     finish(0);
 }
