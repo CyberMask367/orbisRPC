@@ -26,10 +26,16 @@ Called dialogs without loading sysmodules. Fixed: module loads in
 `ui_init`, app exits quietly if they fail. If you still panic, your PKG
 predates the fix — reinstall.
 
-## Loaders closed (9090/9021/9020)
+## Payload won't start
 
-Normal when GoldHEN's BinLoader toggle is off. Flip it in GoldHEN's menu.
-Reboot wipes jailbreak + daemon (RAM-only); re-jailbreak, then inject.
+The Setup PKG only writes `/data/GoldHEN/bin/elf/orbisrpc.bin` — it never
+launches anything. Start it from GoldHEN's payload menu, or enable AutoRun
+for `orbisrpc` once so it boots with every jailbreak.
+
+Manual injection (see `injecting.md`) still exists and needs the loaders
+open: ports 9090/9021/9020 are closed whenever GoldHEN's BinLoader toggle
+is off. Flip it in GoldHEN's menu. Reboot wipes jailbreak + daemon
+(RAM-only), so re-jailbreak first.
 
 ## Token rejected (close 4004)
 

@@ -20,9 +20,9 @@ playing to Discord: name, cover art, timer. No PC at runtime.</p>
 1. Grab `OrbisRPC-Setup-1.0.0.pkg` from the
    [Releases page](https://github.com/SirHumza/orbisRPC/releases/tag/v1.0.0)
    and install it with Package Installer.
-2. Open **orbisRPC Setup** → say Yes. It installs the daemon, checks WiFi,
-   saves your Discord token, and starts everything.
-3. Launch a game. Watch Discord.
+2. Open **orbisRPC Setup** → say Yes. It drops the daemon into GoldHEN's
+   `bin/elf`, checks WiFi, and saves your Discord token.
+3. Start **orbisrpc** from GoldHEN's payload menu, launch a game, watch Discord.
 
 After a reboot: re-jailbreak, then enable AutoRun for `orbisrpc` in GoldHEN's
 payload menu once — it starts itself on every jailbreak after that.
@@ -36,7 +36,7 @@ payload menu once — it starts itself on every jailbreak after that.
 | ⏱️ **True timers** | Survive reconnects and restarts, resume across quick game switches. |
 | 🧠 **Self-learning** | First-seen titles are remembered, so later boots resolve instantly. |
 | 🔄 **Self-updating** | Signed daemon updates with boot rollback. No reinstall treadmill. |
-| 📦 **One-tap installer** | Setup PKG: install → WiFi check → token → running. |
+| 📦 **One-tap installer** | Setup PKG: install → WiFi check → token → payload in place. |
 
 ## How it works
 

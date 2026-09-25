@@ -14,7 +14,7 @@ boot proof to go wrong.
 ## Navigation law
 
 No branch ever returns to start. Cancel/skip always moves forward. The only
-exits are Done, explicit close, or fatal boot failure.
+exits are Done, explicit close, or a payload write failure.
 
 ## Console facts encoded
 
@@ -38,4 +38,5 @@ installer shows where, it can't write the queue itself.
 ## Building
 
 `make -f installer/Makefile` (`OO_PS4_TOOLCHAIN`, llvmshim). Staged assets:
-daemon + evict ELFs. Output: `IV0000-ORPC00001_00-ORBISRPCSETUP000.pkg`.
+daemon + evict ELFs — the installer only reads the daemon, evict rides along
+for manual injection. Output: `IV0000-ORPC00001_00-ORBISRPCSETUP000.pkg`.
