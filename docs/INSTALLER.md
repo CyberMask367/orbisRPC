@@ -3,12 +3,13 @@
 ## What it does
 
 One linear flow, forward-only (every No skips ahead, nothing loops back):
-confirm → copy daemon to `/data/orbisRPC/orbisrpc.elf` + every payload dir
-(`GoldHEN/payloads`, `GoldHEN/bin/elf`, `/data/payloads`, `/data/bin/elf`,
-`/user/data/payloads`) with a per-path OK/denied report → WiFi check →
-token prompt (skipped when valid) → evict rotation → loopback inject
-(127.0.0.1:9090→9021→9020) → boot proof (waits for first log heartbeat)
-→ done. Declining install offers a read-only status screen instead.
+confirm → copy `orbisrpc.bin` to `/data/GoldHEN/bin/elf/` (mkdir -p + size
+read-back, one OK/denied line) → WiFi check → token prompt (skipped when
+valid) → done. Declining install offers a read-only status screen instead.
+
+The installer never boots anything. Starting the daemon is GoldHEN's
+payload menu or AutoRun — see below. No loopback ports, no eviction, no
+boot proof to go wrong.
 
 ## Navigation law
 

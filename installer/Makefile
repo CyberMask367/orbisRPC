@@ -1,5 +1,5 @@
 # orbisRPC Setup installer (OpenOrbis app).
-# Flow: Inject (loopback 9090->9021->9020) -> token -> network test -> tweaks.
+# Flow: files (bin/elf) -> network test -> token. Booting is GoldHEN's job.
 TITLE       := orbisRPC Setup
 VERSION     := 1.0.0
 TITLE_ID    := ORPC00001

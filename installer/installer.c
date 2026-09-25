@@ -1,6 +1,11 @@
 /* installer.c - orbisRPC Setup, stripped to the bone:
- * install files -> wifi check -> token -> inject -> done.
- * One confirm up front; everything after flows forward. */
+ * install files -> wifi check -> token -> done.
+ * One confirm up front; everything after flows forward.
+ *
+ * Payload placement is the whole job: one copy of orbisrpc.bin into
+ * /data/GoldHEN/bin/elf. Booting it is GoldHEN's payload menu (or
+ * AutoRun), never this app - an installer that also injects fails in
+ * ways the user cannot fix from the wizard. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -11,7 +16,6 @@
 #include <orbis/libkernel.h>
 #include <orbis/SystemService.h>
 #include "ui.h"
-#include "send.h"
 #include "icfg.h"
 #include "nettest.h"
 
@@ -19,29 +23,21 @@
 #define SETUP_VERSION "1.0.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
-#define EVICT_ELF "/app0/assets/evict.elf"
-#define EVICT_RESULT "/data/orbisRPC/evict.txt"
 #define INST_DIR "/data/orbisRPC"
-#define INST_BIN "/data/orbisRPC/orbisrpc.elf"
+/* The one place the payload lives: GoldHEN's bin/elf loader directory. */
+#define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
 
-/* Preflight: the payloads must exist inside this package. A PKG built
+/* Preflight: the payload must exist inside this package. A PKG built
  * or installed without staged assets fails here with a precise message
  * instead of a mysterious write error three steps later. */
 static int step_assets(void){
     FILE *a = fopen(DAEMON_ELF, "rb");
-    FILE *b = fopen(EVICT_ELF, "rb");
     if(a) fclose(a);
-    if(b) fclose(b);
-    if(!a || !b){
+    if(!a){
         ui_ok("This install is missing its payload.\n\nReinstall the Setup PKG (do not just relaunch the old bubble), then open it again.");
         return -1;
     }
     return 0;
-}
-
-static long file_mtime(const char *p){
-    struct stat st;
-    return (stat(p, &st) == 0) ? (long)st.st_mtime : 0;
 }
 
 static int copy_file(const char *src, const char *dst){    FILE *in, *out;
@@ -84,43 +80,22 @@ static int mkdirs(const char *path){
     return 0;
 }
 
-/* Every payload directory any GoldHEN-era tool scans, written + reported
- * individually. App sandboxing may deny some; each result is shown so the
- * real one is visible instead of guessed. */
-static const char *payload_dirs[] = {
-    "/data/GoldHEN/payloads",
-    "/data/GoldHEN/bin/elf",
-    "/data/payloads",
-    "/data/bin/elf",
-    "/user/data/payloads",
-};
-
 static int step_files(void){
-    char line[320];
-    char report[768];
-    size_t used;
-    unsigned i;
-    int bins = 0;
+    char report[512];
+    int ok = -1;
     mkdir(INST_DIR, 0777);
-    if(copy_file(DAEMON_ELF, INST_BIN) != 0){
-        ui_ok("Install failed: could not write the daemon.\n\nStopping here.");
+    if(mkdirs("/data/GoldHEN/bin/elf") == 0)
+        ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
+    snprintf(report, sizeof report,
+             "Daemon payload:\n%s : %s\n\n"
+             "Start it from GoldHEN's payload menu (bin/elf), or enable\n"
+             "AutoRun for orbisrpc once and it boots with every jailbreak.",
+             PAYLOAD_BIN, ok == 0 ? "OK" : "denied");
+    ui_ok(report);
+    if(ok != 0){
+        ui_ok("Install failed: could not write the payload.\n\nStopping here.");
         return -1;
     }
-    used = (size_t)snprintf(report, sizeof report, "Daemon installed to:\n%s", INST_BIN);
-    for(i = 0; i < sizeof payload_dirs/sizeof payload_dirs[0]; i++){
-        int ok = -1;
-        if(mkdirs(payload_dirs[i]) == 0){
-            snprintf(line, sizeof line, "%s/orbisrpc.bin", payload_dirs[i]);
-            ok = copy_file(DAEMON_ELF, line);
-        }
-        if(ok == 0) bins++;
-        used += (size_t)snprintf(report + used, sizeof report - used,
-                                 "\n%s : %s", payload_dirs[i], ok == 0 ? "OK" : "denied");
-        if(used >= sizeof report - 64) break;
-    }
-    snprintf(report + used, sizeof report - used,
-             "\n\nWhichever loader lists payloads, one of these is it (%d placed).", bins);
-    ui_ok(report);
     /* Config template when missing; never clobbers learned titles. */
     {
         char tok[160];
@@ -175,46 +150,6 @@ static void step_token(void){
     }
 }
 
-/* 4: inject (evict rotation so reinstalls take over). */
-static void step_inject(void){
-    int port = 0;
-    char msg[160];
-    if(ui_progress_open("Starting orbisRPC...") != 0) return;
-    remove(EVICT_RESULT);
-    if(send_file_loopback(EVICT_ELF, &port, NULL) == 0){
-        int waited = 0;
-        while(waited < 40){
-            sleep(2);
-            waited += 2;
-            if(file_mtime(EVICT_RESULT) != 0) break;
-        }
-    }
-    ui_progress_msg("Starting orbisRPC...");
-    ui_progress_set(0);
-    if(send_file_loopback(DAEMON_ELF, &port, ui_progress_set) == 0){
-        /* Prove it booted: the daemon writes its log within seconds.
-         * No growth after ~25 s = sent but not running (say so). */
-        long lsz = file_mtime("/data/orbisRPC/log.txt");
-        int waited = 0;
-        int alive = 0;
-        ui_progress_msg("Waiting for first heartbeat...");
-        while(waited < 25){
-            sleep(2);
-            waited += 2;
-            if(file_mtime("/data/orbisRPC/log.txt") != lsz){ alive = 1; break; }
-        }
-        ui_progress_close();
-        if(alive)
-            snprintf(msg, sizeof msg, "orbisRPC is running (loader port %d).\n\nLaunch a game and watch Discord.", port);
-        else
-            snprintf(msg, sizeof msg, "Sent via port %d but no heartbeat yet.\n\nGive it a minute; if Discord stays dark, relaunch this app.", port);
-        ui_ok(msg);
-    } else {
-        ui_progress_close();
-        ui_ok("Start failed on every loader port.\n\nIs GoldHEN's BinLoader on? The files are installed, so just relaunch this app later.");
-    }
-}
-
 /* Status: read-only health snapshot for debugging. Never mutates. */
 static void step_status(void){
     char out[640];
@@ -225,7 +160,7 @@ static void step_status(void){
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
     used = (size_t)snprintf(out, sizeof out, "orbisRPC status:\n");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ndaemon files: %s", stat(INST_BIN, &st) == 0 ? "installed" : "missing");
+        "\ndaemon files: %s", stat(PAYLOAD_BIN, &st) == 0 ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
         "\nlock: %s", stat("/data/orbisRPC/daemon.lock", &st) == 0 ? "held (may be running)" : "free");
     if(stat("/data/orbisRPC/log.txt", &st) == 0){
@@ -254,7 +189,7 @@ int main(void){
     sceSystemServiceHideSplashScreen();
     sceKernelSleep(3);
     snprintf(welcome, sizeof welcome,
-             "orbisRPC Setup %s\n\nInstalls the daemon, checks WiFi, saves your token, and starts it.",
+             "orbisRPC Setup %s\n\nInstalls the daemon payload, checks WiFi, and saves your token.",
              SETUP_VERSION);
     q = ui_confirm(welcome);
     if(q != 1){
@@ -267,10 +202,9 @@ int main(void){
     if(step_files() != 0) return 1;
     step_wifi();
     step_token();
-    step_inject();
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
-          "After a reboot, re-jailbreak, then open GoldHEN's payload menu\n"
-          "and enable AutoRun for orbisrpc — it will start itself\n"
-          "on every jailbreak from then on.");
+          "The payload is in GoldHEN's bin/elf. To start it, open GoldHEN's\n"
+          "payload menu and pick orbisrpc, or enable AutoRun for it once\n"
+          "so it starts on every jailbreak.");
     return 0;
 }
