@@ -56,34 +56,69 @@ static int step_assets(void){
     return 0;
 }
 
+/* The sandbox makes stat()/fstat() lie about sizes (observed: 4096/4160
+ * for a 2071552-byte file, which made a perfect copy report "denied").
+ * open/read/write are truthful, so the proof is: count and hash what we
+ * wrote, then count and hash what we read back. No stat anywhere. */
+static unsigned long long fnv1a(const unsigned char *p, size_t n,
+                                unsigned long long h){
+    size_t i;
+    for(i = 0; i < n; i++){
+        h ^= p[i];
+        h *= 1099511628211ULL;
+    }
+    return h;
+}
+
 static int copy_file(const char *src, const char *dst){
     FILE *in, *out;
     static unsigned char buf[65536];
     size_t n;
-    long expect = -1, got;
-    struct stat st;
-    int err = 0;
+    long written = 0, reread = 0;
+    unsigned long long hw = 14695981039346656037ULL, hr = 14695981039346656037ULL;
+    char detail[96];
+
     in = fopen(src, "rb");
     if(!in){ ilog("src-open", errno, -1, -1); return -1; }
-    if(fstat(fileno(in), &st) == 0) expect = (long)st.st_size;
-    else ilog("src-fstat", errno, -1, -1);
     out = fopen(dst, "wb");
-    if(!out){ ilog("dst-open", errno, expect, -1); fclose(in); return -1; }
+    if(!out){ ilog("dst-open", errno, -1, -1); fclose(in); return -1; }
     while((n = fread(buf, 1, sizeof buf, in)) > 0){
         if(fwrite(buf, 1, n, out) != n){
-            err = errno;
-            ilog("dst-write", err, expect, -1);
+            ilog("dst-write", errno, written, -1);
             fclose(in); fclose(out); return -1;
         }
+        hw = fnv1a(buf, n, hw);
+        written += (long)n;
     }
     fclose(in);
-    if(fclose(out) != 0){ ilog("dst-close", errno, expect, -1); return -1; }
-    /* Read-back proof: a short write must never pass as installed. */
-    if(expect > 0 && stat(dst, &st) == 0) got = (long)st.st_size;
-    else { got = -1; ilog("dst-stat", errno, expect, -1); }
-    if(expect > 0 && got == expect){ ilog("copy-ok", 0, expect, got); return 0; }
-    ilog("size-mismatch", 0, expect, got);
+    if(fclose(out) != 0){ ilog("dst-close", errno, written, -1); return -1; }
+    if(written <= 0){ ilog("src-empty", 0, written, -1); return -1; }
+
+    /* Read-back proof: reopen and re-count/re-hash the destination. */
+    in = fopen(dst, "rb");
+    if(!in){ ilog("verify-open", errno, written, -1); return -1; }
+    while((n = fread(buf, 1, sizeof buf, in)) > 0){
+        hr = fnv1a(buf, n, hr);
+        reread += (long)n;
+    }
+    fclose(in);
+    snprintf(detail, sizeof detail, "h=%016llx/%016llx", hw, hr);
+    if(written == reread && hw == hr){
+        ilog("copy-ok", 0, written, reread);
+        return 0;
+    }
+    ilog("verify-mismatch", 0, written, reread);
+    ilog(detail, 0, 0, 0);
+    g_stage = "verify-mismatch";
     return -1;
+}
+
+/* Existence check without stat() (the sandbox lies about stat sizes). */
+static int exists(const char *p){
+    FILE *f = fopen(p, "rb");
+    if(!f) return 0;
+    fclose(f);
+    return 1;
 }
 
 /* mkdir -p (parents as needed). 0 ok or already there. */
@@ -181,26 +216,21 @@ static void step_token(void){
     }
 }
 
-/* Status: read-only health snapshot for debugging. Never mutates. */
+/* Status: read-only health snapshot for debugging. Never mutates.
+ * Existence only — stat() sizes/mtimes are unreliable under the sandbox. */
 static void step_status(void){
     char out[640];
     size_t used = 0;
     char tok[160];
-    struct stat st;
     tok[0] = 0;
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
     used = (size_t)snprintf(out, sizeof out, "orbisRPC status:\n");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ndaemon files: %s", stat(PAYLOAD_BIN, &st) == 0 ? "installed" : "missing");
+        "\ndaemon payload: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nlock: %s", stat("/data/orbisRPC/daemon.lock", &st) == 0 ? "held (may be running)" : "free");
-    if(stat("/data/orbisRPC/log.txt", &st) == 0){
-        long age = (long)time(NULL) - (long)st.st_mtime;
-        used += (size_t)snprintf(out + used, sizeof out - used,
-            "\nlog: present, last write %lds ago", age < 0 ? 0 : age);
-    } else {
-        used += (size_t)snprintf(out + used, sizeof out - used, "\nlog: none yet");
-    }
+        "\nlock: %s", exists("/data/orbisRPC/daemon.lock") ? "held (may be running)" : "free");
+    used += (size_t)snprintf(out + used, sizeof out - used,
+        "\nlog: %s", exists("/data/orbisRPC/log.txt") ? "present" : "none yet");
     used += (size_t)snprintf(out + used, sizeof out - used,
         "\ntoken: %s", token_valid(tok) ? "saved" : "missing/invalid");
     used += (size_t)snprintf(out + used, sizeof out - used,
