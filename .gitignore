@@ -11,6 +11,7 @@ config/config.ps4.json
 plugin/build/
 tests/test_utils
 config/icons/
+!config/icons/logo.png
 
 # installer artifacts
 *.pkg
