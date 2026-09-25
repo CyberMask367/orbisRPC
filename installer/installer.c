@@ -1,5 +1,5 @@
 /* installer.c - orbisRPC Setup, stripped to the bone:
- * install files -> wifi check -> token -> done.
+ * install files -> token -> done.
  * One confirm up front; everything after flows forward.
  *
  * Payload placement is the whole job: one copy of orbisrpc.bin into
@@ -16,9 +16,7 @@
 #include <orbis/libkernel.h>
 #include <orbis/SystemService.h>
 #include "ui.h"
-#include "send.h"
 #include "icfg.h"
-#include "nettest.h"
 
 #ifndef SETUP_VERSION
 #define SETUP_VERSION "1.0.0"
@@ -197,26 +195,11 @@ static int step_files(void){
     return 0;
 }
 
-/* 2: wifi. Always continues forward; result is information. */
-static void step_wifi(void){
-    int ok, rc;
-    ilogv("wifi-begun", 0, 0);
-    rc = net_init();
-    ilogv("net-init", rc, 0);
-    if(ui_progress_open("Checking connection...") != 0){
-        ilogv("progress-fail", 0, 0);
-        return;
-    }
-    ilogv("progress-open", 0, 0);
-    ok = net_probe("gateway.discord.gg", 443, 6);
-    ilogv("probe-result", ok, 0);
-    ui_progress_close();
-    ui_ok(ok ? "WiFi check: OK.\n\nDiscord is reachable from this console."
-             : "WiFi check: FAILED.\n\nDiscord is unreachable. Presence will not work until the network does.\nContinuing anyway.");
-    ilogv("wifi-done", ok, 0);
-}
+/* 2: wifi check removed on purpose: it probed gateway.discord.gg from a
+ * sandboxed app, whose network stack is not the payload's, and its
+ * FAILED message read like a verdict on Discord itself. */
 
-/* 3: token. Skips silently when one already validates. */
+/* 2: token. Skips silently when one already validates. */
 static void step_token(void){
     char tok[160];
     int tries, r;
@@ -275,7 +258,7 @@ int main(void){
     sceSystemServiceHideSplashScreen();
     sceKernelSleep(3);
     snprintf(welcome, sizeof welcome,
-             "orbisRPC Setup %s\n\nInstalls the daemon payload, checks WiFi, and saves your token.",
+             "orbisRPC Setup %s\n\nInstalls the daemon payload and saves your Discord token.",
              SETUP_VERSION);
     q = ui_confirm(welcome);
     if(q != 1){
@@ -287,8 +270,6 @@ int main(void){
     if(step_assets() != 0) return 1;
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) return 1;
-    step_wifi();
-    ilogv("post-wifi", 0, 0);
     step_token();
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
