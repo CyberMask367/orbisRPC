@@ -10,7 +10,6 @@
 #include <orbis/ImeDialog.h>
 #include <orbis/UserService.h>
 #include <orbis/Sysmodule.h>
-#include <orbis/SystemService.h>
 #include <orbis/libkernel.h>
 #include <orbis/_types/user.h>
 
@@ -24,7 +23,6 @@ static void base_init(OrbisMsgDialogParam *param){
 }
 
 static int ui_ready = 0;
-static int g_cross_default = 1; /* true unless system says Circle=confirm */
 
 int ui_init(void){
     if(ui_ready) return 0;
@@ -58,17 +56,17 @@ int ui_init(void){
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
         return -1;
     }
-    /* The dialog's fixed mapping treats Circle as the confirm button
-     * (Japanese-style). Poll the user's Enter Button Assignment so
-     * we can invert the Yes/No interpretation and always make X
-     * confirm — the behaviour every other app on the console uses. */
-    {
-        int32_t v = 0;
-        if (sceSystemServiceParamGetInt(ORBIS_SYSTEM_SERVICE_PARAM_ID_ENTER_BUTTON_ASSIGN, &v) == 0)
-            g_cross_default = (v == ORBIS_SYSTEM_PARAM_ENTER_BUTTON_ASSIGN_CROSS);
-    }
     ui_ready = 1;
     return 0;
+}
+
+/* If a previous session died between open and terminate, a dialog
+ * is still marked RUNNING and a fresh open() fails. Reap it first. */
+static void reap_stale(void){
+    if(sceMsgDialogGetStatus() == ORBIS_COMMON_DIALOG_STATUS_RUNNING)
+        sceMsgDialogTerminate();
+    if(sceImeDialogGetStatus() == ORBIS_DIALOG_STATUS_RUNNING)
+        sceImeDialogTerm();
 }
 
 int ui_ok(const char *msg){
@@ -76,6 +74,7 @@ int ui_ok(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
+    reap_stale();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
@@ -98,14 +97,13 @@ int ui_confirm(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
+    reap_stale();
     if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
-    /* Yes/No dialog. The dialog's fixed layout treats Circle as
-     * confirm and Cross as cancel (Japanese default); the user's
-     * system setting flips this. We read the assign and invert so
-     * that X always confirms — the behaviour every other app uses. */
+    /* Always return X as confirm, O as back: the dialog's
+     * fixed layout treats Circle as confirm, so invert the id. */
     um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
@@ -114,14 +112,7 @@ int ui_confirm(const char *msg){
     sceMsgDialogClose();
     sceMsgDialogGetResult(&res);
     sceMsgDialogTerminate();
-    /* Button mapping: the dialog's fixed layout treats Circle as
-     * confirm and Cross as cancel (Japanese default). The user's
-     * system setting flips this. Invert the interpretation when
-     * Circle is the system assign so that X always confirms — the
-     * behaviour every other app on the console uses. */
-    int yes = (res.buttonId == ORBIS_MSG_DIALOG_BUTTON_ID_YES)
-           ^ (g_cross_default == 0);
-    return yes ? 1 : 0;
+    return (res.buttonId == ORBIS_MSG_DIALOG_BUTTON_ID_NO) ? 1 : 0;
 }
 
 static int progress_open = 0;
@@ -197,6 +188,7 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     st.verticalAlignment = ORBIS_V_CENTER;
     st.placeholder = wplace;
     st.title = wtitle;
+    reap_stale();
     if(sceImeDialogInit(&st, NULL) < 0) return -1;
     /* Pump until the OSK stops (IME uses its own status enum). Bounded:
      * a dialog stuck in NONE (failed init we couldn't see) aborts instead
@@ -223,9 +215,9 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     return 1;
 }
 
-/* Teardown for exit: terminate any live dialog, then unload the dialog
- * modules we loaded in ui_init (mirrors the known-good shutdown in
- * rutracker-ps4). Called before _exit so no dialog outlives the app. */
+/* Teardown for exit: terminate any live dialog, then unload the
+ * modules loaded in ui_init. Called before _exit so no dialog
+ * outlives the app. */
 void ui_shutdown(void){
     if(!ui_ready) return;
     ui_ready = 0;
