@@ -24,8 +24,24 @@
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define INST_DIR "/data/orbisRPC"
+#define INST_LOG "/data/orbisRPC/install.log"
 /* The one place the payload lives: GoldHEN's bin/elf loader directory. */
 #define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
+
+/* Stage log: every copy step records errno + sizes to a file we can read
+ * back over FTP. The dialog alone can't say WHICH stage failed. */
+static const char *g_stage = "-";
+
+static void ilog(const char *tag, int err, long expect, long got){
+    FILE *f;
+    g_stage = tag;
+    f = fopen(INST_LOG, "a");
+    if(!f) f = fopen("/data/install.log", "a");   /* fallback if sandbox blocks */
+    if(!f) return;
+    fprintf(f, "%ld %s errno=%d(%s) expect=%ld got=%ld\n",
+            (long)time(NULL), tag, err, err ? strerror(err) : "ok", expect, got);
+    fclose(f);
+}
 
 /* Preflight: the payload must exist inside this package. A PKG built
  * or installed without staged assets fails here with a precise message
@@ -40,25 +56,34 @@ static int step_assets(void){
     return 0;
 }
 
-static int copy_file(const char *src, const char *dst){    FILE *in, *out;
+static int copy_file(const char *src, const char *dst){
+    FILE *in, *out;
     static unsigned char buf[65536];
     size_t n;
     long expect = -1, got;
     struct stat st;
+    int err = 0;
     in = fopen(src, "rb");
-    if(!in) return -1;
+    if(!in){ ilog("src-open", errno, -1, -1); return -1; }
     if(fstat(fileno(in), &st) == 0) expect = (long)st.st_size;
+    else ilog("src-fstat", errno, -1, -1);
     out = fopen(dst, "wb");
-    if(!out){ fclose(in); return -1; }
+    if(!out){ ilog("dst-open", errno, expect, -1); fclose(in); return -1; }
     while((n = fread(buf, 1, sizeof buf, in)) > 0){
-        if(fwrite(buf, 1, n, out) != n){ fclose(in); fclose(out); return -1; }
+        if(fwrite(buf, 1, n, out) != n){
+            err = errno;
+            ilog("dst-write", err, expect, -1);
+            fclose(in); fclose(out); return -1;
+        }
     }
     fclose(in);
-    if(fclose(out) != 0) return -1;
+    if(fclose(out) != 0){ ilog("dst-close", errno, expect, -1); return -1; }
     /* Read-back proof: a short write must never pass as installed. */
     if(expect > 0 && stat(dst, &st) == 0) got = (long)st.st_size;
-    else got = -1;
-    return (expect > 0 && got == expect) ? 0 : -1;
+    else { got = -1; ilog("dst-stat", errno, expect, -1); }
+    if(expect > 0 && got == expect){ ilog("copy-ok", 0, expect, got); return 0; }
+    ilog("size-mismatch", 0, expect, got);
+    return -1;
 }
 
 /* mkdir -p (parents as needed). 0 ok or already there. */
@@ -83,14 +108,20 @@ static int mkdirs(const char *path){
 static int step_files(void){
     char report[512];
     int ok = -1;
+    int mk = -1;
     mkdir(INST_DIR, 0777);
-    if(mkdirs("/data/GoldHEN/bin/elf") == 0)
+    mk = mkdirs("/data/GoldHEN/bin/elf");
+    ilog("mkdirs", mk == 0 ? 0 : errno, -1, -1);
+    if(mk == 0)
         ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     snprintf(report, sizeof report,
-             "Daemon payload:\n%s : %s\n\n"
+             "Daemon payload:\n%s : %s%s%s%s\n\n"
              "Start it from GoldHEN's payload menu (bin/elf), or enable\n"
              "AutoRun for orbisrpc once and it boots with every jailbreak.",
-             PAYLOAD_BIN, ok == 0 ? "OK" : "denied");
+             PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
+             ok == 0 ? "" : " [stage ",
+             ok == 0 ? "" : g_stage,
+             ok == 0 ? "" : "]");
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
