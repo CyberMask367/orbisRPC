@@ -3,9 +3,9 @@
  * One confirm up front; everything after flows forward.
  *
  * Payload placement is the whole job: one copy of orbisrpc.bin into
- * /data/payloads. Booting it is the payload launcher reading
- * /data/payloads, never this app - an installer that also injects fails in
- * ways the user cannot fix from the wizard. */
+ * /data/GoldHEN/bin/elf. GoldHEN's payload launcher reads
+ * this directory; never this app - an installer that also
+ * injects fails in GoldHEN's eyes. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -27,8 +27,7 @@
 #define DAEMON_ELF "/app0/assets/daemon.elf"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
-/* The one place the payload lives: the payload launcher directory. */
-#define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
+#define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -221,15 +220,12 @@ static int mkdirs(const char *path){
 static int step_files(void){
     char report[512];
     int ok = -1;
-    int mk = -1;
     mkdir(INST_DIR, 0777);
-    mk = mkdirs("/data/payloads");
-    ilog("mkdirs", mk == 0 ? 0 : errno, -1, -1);
-    if(mk == 0)
-        ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
+    mkdirs("/data/GoldHEN/bin/elf");
+    ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     snprintf(report, sizeof report,
              "Daemon payload:\n%s : %s%s%s%s\n\n"
-             "Start it from the payload launcher (/data/payloads)\n"
+             "Start it from the payload launcher (/data/GoldHEN/bin/elf)\n"
              "and pick orbisrpc.",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
              ok == 0 ? "" : " [stage ",
@@ -300,7 +296,7 @@ static void step_status(void){
     char tok[160];
     tok[0] = 0;
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
-    used = (size_t)snprintf(out, sizeof out, "orbisRPC status:\n");
+    snprintf(out, sizeof out, "orbisRPC status:\n");
     used += (size_t)snprintf(out + used, sizeof out - used,
         "\ndaemon payload: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
@@ -341,7 +337,7 @@ int main(void){
     step_token();
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
-          "The payload is in /data/payloads. To start it, open the\n"
-          "payload launcher and pick orbisrpc.");
+           "The payload is in /data/GoldHEN/bin/elf. To start it, open the\n"
+           "payload launcher and pick orbisrpc.");
     finish(0);
 }

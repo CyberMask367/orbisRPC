@@ -44,25 +44,25 @@ int ui_init(void){
         up.priority = ORBIS_KERNEL_PRIO_FIFO_LOWEST;
         (void)sceUserServiceInitialize(&up);
     }
-    /* Internal service modules first (Payload Guest boot pattern):
-     * dialogs and system calls misbehave when these aren't up. */
+    /* Mirrors apollo-ps4 initInternal()/initPad():
+     * 1. internal modules (SYSTEM, USER, COMMON_DIALOG)
+     * 2. sceCommonDialogInitialize()  <- BEFORE external modules
+     * 3. PAD module + scePadInit()
+     * 4. external modules (MESSAGE_DIALOG, IME_DIALOG, IME_BACKEND)
+     * Order matters: dialog init must precede external module loads,
+     * and COMMON_DIALOG must precede sceCommonDialogInitialize(). */
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_SYSTEM_SERVICE) != 0) return -1;
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_USER_SERVICE) != 0) return -1;
+    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_COMMON_DIALOG) != 0) return -1;
+    if(sceCommonDialogInitialize() < 0) return -1;
     if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_PAD) != 0) return -1;
     (void)scePadInit();
-    if(sceSysmoduleLoadModuleInternal(ORBIS_SYSMODULE_INTERNAL_COMMON_DIALOG) != 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG) < 0) return -1;
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_DIALOG) < 0){
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
         return -1;
     }
     if(sceSysmoduleLoadModule(ORBIS_SYSMODULE_IME_BACKEND) < 0){
-        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
-        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
-        return -1;
-    }
-    if(sceCommonDialogInitialize() < 0){
-        sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_BACKEND);
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
         sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
         return -1;
