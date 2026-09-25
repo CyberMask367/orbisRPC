@@ -16,6 +16,7 @@
 #include <orbis/libkernel.h>
 #include <orbis/SystemService.h>
 #include "ui.h"
+#include "send.h"
 #include "icfg.h"
 #include "nettest.h"
 
@@ -40,6 +41,17 @@ static void ilog(const char *tag, int err, long expect, long got){
     if(!f) return;
     fprintf(f, "%ld %s errno=%d(%s) expect=%ld got=%ld\n",
             (long)time(NULL), tag, err, err ? strerror(err) : "ok", expect, got);
+    fclose(f);
+}
+
+/* Stage marker without errno semantics (rc values, not errnos). */
+static void ilogv(const char *tag, long a, long b){
+    FILE *f;
+    g_stage = tag;
+    f = fopen(INST_LOG, "a");
+    if(!f) f = fopen("/data/install.log", "a");
+    if(!f) return;
+    fprintf(f, "%ld %s a=%ld b=%ld\n", (long)time(NULL), tag, a, b);
     fclose(f);
 }
 
@@ -162,6 +174,7 @@ static int step_files(void){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
         return -1;
     }
+    ilogv("report-done", ok, 0);
     /* Config template when missing; never clobbers learned titles. */
     {
         char tok[160];
@@ -180,17 +193,27 @@ static int step_files(void){
             }
         }
     }
+    ilogv("cfg-done", 0, 0);
     return 0;
 }
 
 /* 2: wifi. Always continues forward; result is information. */
 static void step_wifi(void){
-    int ok;
-    if(ui_progress_open("Checking connection...") != 0) return;
+    int ok, rc;
+    ilogv("wifi-begun", 0, 0);
+    rc = net_init();
+    ilogv("net-init", rc, 0);
+    if(ui_progress_open("Checking connection...") != 0){
+        ilogv("progress-fail", 0, 0);
+        return;
+    }
+    ilogv("progress-open", 0, 0);
     ok = net_probe("gateway.discord.gg", 443, 6);
+    ilogv("probe-result", ok, 0);
     ui_progress_close();
     ui_ok(ok ? "WiFi check: OK.\n\nDiscord is reachable from this console."
              : "WiFi check: FAILED.\n\nDiscord is unreachable. Presence will not work until the network does.\nContinuing anyway.");
+    ilogv("wifi-done", ok, 0);
 }
 
 /* 3: token. Skips silently when one already validates. */
@@ -198,9 +221,11 @@ static void step_token(void){
     char tok[160];
     int tries, r;
     tok[0] = 0;
+    ilogv("token-begun", 0, 0);
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
     if(token_valid(tok)){
         ui_ok("A valid token is already saved.\n\nSkipping.");
+        ilogv("token-skip", 0, 0);
         return;
     }
     for(tries = 0; tries < 3; tries++){
@@ -260,12 +285,16 @@ int main(void){
         return 0;
     }
     if(step_assets() != 0) return 1;
+    ilogv("assets-ok", 0, 0);
     if(step_files() != 0) return 1;
     step_wifi();
+    ilogv("post-wifi", 0, 0);
     step_token();
+    ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
           "The payload is in GoldHEN's bin/elf. To start it, open GoldHEN's\n"
           "payload menu and pick orbisrpc, or enable AutoRun for it once\n"
           "so it starts on every jailbreak.");
+    ilogv("exit", 0, 0);
     return 0;
 }
