@@ -153,7 +153,7 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     wtitle[i] = 0;
     for(i = 0; i < 63 && placeholder && placeholder[i]; i++) wplace[i] = (wchar_t)(unsigned char)placeholder[i];
     wplace[i] = 0;
-    if(sceUserServiceGetInitialUser(&uid) < 0) uid = 0;
+    if(sceUserServiceGetForegroundUser(&uid) < 0 || uid <= 0) uid = 1;
     memset(&st, 0, sizeof st);
     st.userId = (uint32_t)uid;
     st.type = 0;
@@ -164,8 +164,11 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
     st.option = 0;
     st.maxTextLength = (uint32_t)(cap - 1);
     st.inputTextBuffer = wbuf;
-    st.posx = 0;
-    st.posy = 0;
+    /* Center of 1920x1080. At (0,0) the panel anchors up-left and the
+     * keyboard renders half off-screen; 960,540 is the layout that is
+     * known-good on this console (rutracker-ps4 uses the same values). */
+    st.posx = 960;
+    st.posy = 540;
     st.horizontalAlignment = ORBIS_H_CENTER;
     st.verticalAlignment = ORBIS_V_CENTER;
     st.placeholder = wplace;
