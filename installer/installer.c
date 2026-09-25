@@ -3,9 +3,8 @@
  * One confirm up front; everything after flows forward.
  *
  * Payload placement is the whole job: one copy of orbisrpc.bin into
- * /data/GoldHEN/bin/elf. GoldHEN's payload launcher reads
- * this directory; never this app - an installer that also
- * injects fails in GoldHEN's eyes. */
+ * /data/payloads. Payload Guest reads this directory;
+ * the installer copies here; never this app. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -28,8 +27,8 @@
 #define EVICT_ELF "/app0/assets/evict.elf"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
-#define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
-#define EVICT_BIN "/data/GoldHEN/bin/elf/evict.elf"
+#define PAYLOAD_BIN "/data/payloads/orbisrpc.bin"
+#define EVICT_BIN "/data/payloads/evict.elf"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -224,7 +223,7 @@ static int step_files(void){
     int ok = -1;
     int evict_ok = -1;
     mkdir(INST_DIR, 0777);
-    mkdirs("/data/GoldHEN/bin/elf");
+    mkdirs("/data/payloads");
     /* Evict any running orbisRPC daemon before copying new payload.
      * Read PID from daemon.lock and send SIGTERM then SIGKILL. */
     {
@@ -276,12 +275,13 @@ static int step_files(void){
     snprintf(report, sizeof report,
              "Daemon payload:\n%s : %s%s%s%s\n\n"
              "Evict payload:\n%s : %s%s%s%s\n\n"
-             "Start it from the payload launcher (/data/GoldHEN/bin/elf)\n"
+             "Start it from the payload launcher (/data/payloads)\n"
              "and pick orbisrpc.",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
              ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
              EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
              evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
+    ui_ok(report);
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -394,7 +394,7 @@ int main(void){
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
             "evict.elf removed the old daemon.\n"
-            "Both payloads are in /data/GoldHEN/bin/elf.\n"
+            "Both payloads are in /data/payloads.\n"
             "Launch orbisrpc from the payload launcher.");
     finish(0);
 }

@@ -3,32 +3,31 @@
 ## What it does
 
 One linear flow, forward-only (every No skips ahead, nothing loops back):
-confirm → copy `evict.elf` + `orbisrpc.bin` to `/data/GoldHEN/bin/elf/`
-(mkdir -p + byte-count + FNV hash read-back) → pre-saved config with token
-(skips entry when valid) → done. Read-only status screen available via decline.
+confirm → kill old daemon → copy `evict.elf` + `orbisrpc.bin` to
+`/data/payloads/` (mkdir -p + byte-count + FNV hash read-back) →
+pre-saved config with token (skips entry when valid) → done.
+Read-only status screen available via decline.
 
 There is no WiFi check. The installer runs sandboxed, so its socket probe
 measures the app's network stack, not the payload's — and a FAILED line
 reads like a verdict on Discord itself. The daemon reports real reachability
 in its own log once started.
 
-The installer never boots anything. Starting the daemon is GoldHEN's
-payload menu — pick `evict.elf` first (removes old orbisrpc instance),
-then pick `orbisrpc.bin`. No loopback ports, no injection, no boot proof
-to go wrong.
+The installer never boots anything. Starting the daemon is Payload Guest's
+`/data/payloads/` directory — pick `evict.elf` first (removes old orbisrpc
+instance), then pick `orbisrpc.bin`. No loopback ports, no injection, no
+boot proof to go wrong.
 
 ## Install flow
 
 ```
-confirm → copy evict.elf to /data/GoldHEN/bin/elf/evict.elf
-        → copy orbisrpc.bin to /data/GoldHEN/bin/elf/orbisrpc.bin
+confirm → SIGTERM/SIGKILL old daemon via daemon.lock
+        → copy evict.elf to /data/payloads/evict.elf
+        → copy orbisrpc.bin to /data/payloads/orbisrpc.bin
         → save config.json with Discord token
         → (token entry skipped if already valid)
         → done
 ```
-
-The user then launches `evict.elf` first from GoldHEN's payload menu
-(to evict any running orbisrpc), then launches `orbisrpc.bin`.
 
 ## Navigation law
 
@@ -56,9 +55,9 @@ button on No, which inverts the whole wizard.
 
 ## Auto-start
 
-GoldHEN PayLoader AutoRun (2.4b18.10+): enable it for `orbisrpc` once and
-the daemon starts on every jailbreak. The queue is menu-managed; the
-installer shows where, it can't write the queue itself.
+Payload Guest AutoRun: enable it for `orbisrpc` once and the daemon
+starts on every jailbreak. The queue is menu-managed; the installer
+shows where, it can't write the queue itself.
 
 ## Building
 

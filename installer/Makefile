@@ -1,5 +1,6 @@
 # orbisRPC Setup installer (OpenOrbis app).
-# Flow: daemon payload -> token -> done. GoldHEN launches the payload.
+# Flow: daemon payload -> evict old -> token -> done.
+# Payload Guest reads /data/payloads/ on this console.
 TITLE       := orbisRPC Setup
 VERSION     := 1.0.0
 TITLE_ID    := ORPC00001
