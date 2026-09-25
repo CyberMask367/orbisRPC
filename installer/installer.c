@@ -24,13 +24,27 @@
 #define INST_DIR "/data/orbisRPC"
 #define INST_BIN "/data/orbisRPC/orbisrpc.elf"
 
+/* Preflight: the payloads must exist inside this package. A PKG built
+ * or installed without staged assets fails here with a precise message
+ * instead of a mysterious write error three steps later. */
+static int step_assets(void){
+    FILE *a = fopen(DAEMON_ELF, "rb");
+    FILE *b = fopen(EVICT_ELF, "rb");
+    if(a) fclose(a);
+    if(b) fclose(b);
+    if(!a || !b){
+        ui_ok("This install is missing its payload.\n\nReinstall the Setup PKG (do not just relaunch the old bubble), then open it again.");
+        return -1;
+    }
+    return 0;
+}
+
 static long file_mtime(const char *p){
     struct stat st;
     return (stat(p, &st) == 0) ? (long)st.st_mtime : 0;
 }
 
-static int copy_file(const char *src, const char *dst){
-    FILE *in, *out;
+static int copy_file(const char *src, const char *dst){    FILE *in, *out;
     static unsigned char buf[65536];
     size_t n;
     long expect = -1, got;
@@ -249,6 +263,7 @@ int main(void){
             step_status();
         return 0;
     }
+    if(step_assets() != 0) return 1;
     if(step_files() != 0) return 1;
     step_wifi();
     step_token();
