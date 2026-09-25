@@ -10,6 +10,9 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <stdint.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <errno.h>
 #include <time.h>
@@ -51,6 +54,71 @@ static void ilogv(const char *tag, long a, long b){
     if(!f) return;
     fprintf(f, "%ld %s a=%ld b=%ld\n", (long)time(NULL), tag, a, b);
     fclose(f);
+}
+
+/* --- crash guard ----------------------------------------------------
+ * The wizard has died twice mid-flow with Sony's crash reporter eating
+ * the core file, so the fault address never reached us. These handlers
+ * run async-signal-safe only (no stdio, no malloc): they append the
+ * signal, faulting address and current stage to install.log, then exit
+ * cleanly. A crash becomes evidence instead of a crash dialog. */
+static volatile sig_atomic_t g_crashing = 0;
+
+static size_t h_s(char *b, size_t cap, size_t p, const char *s){
+    while(*s && p + 1 < cap) b[p++] = *s++;
+    return p;
+}
+static size_t h_u(char *b, size_t cap, size_t p, unsigned long v){
+    char t[24];
+    int n = 0;
+    if(v == 0) t[n++] = '0';
+    while(v && n < 24){ t[n++] = (char)('0' + v % 10); v /= 10; }
+    while(n && p + 1 < cap) b[p++] = t[--n];
+    return p;
+}
+static size_t h_x(char *b, size_t cap, size_t p, unsigned long long v){
+    static const char hx[] = "0123456789abcdef";
+    char t[20];
+    int n = 0;
+    if(v == 0) t[n++] = '0';
+    while(v && n < 20){ t[n++] = hx[v & 15]; v >>= 4; }
+    while(n && p + 1 < cap) b[p++] = t[--n];
+    return p;
+}
+
+static void crash_handler(int sig, siginfo_t *si, void *uc){
+    char b[200];
+    size_t p = 0;
+    int fd;
+    ssize_t w;
+    (void)uc;
+    if(g_crashing) _exit(99);
+    g_crashing = 1;
+    p = h_s(b, sizeof b, p, "CRASH sig=");
+    p = h_u(b, sizeof b, p, (unsigned)sig);
+    p = h_s(b, sizeof b, p, " addr=0x");
+    p = h_x(b, sizeof b, p, si ? (unsigned long long)(uintptr_t)si->si_addr : 0);
+    p = h_s(b, sizeof b, p, " stage=");
+    p = h_s(b, sizeof b, p, g_stage ? g_stage : "-");
+    if(p + 1 < sizeof b) b[p++] = '\n';
+    fd = open(INST_LOG, O_WRONLY | O_APPEND | O_CREAT, 0666);
+    if(fd < 0) fd = open("/data/install.log", O_WRONLY | O_APPEND | O_CREAT, 0666);
+    if(fd >= 0){ w = write(fd, b, p); (void)w; close(fd); }
+    _exit(99);
+}
+
+static void crash_guard(void){
+    static const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT, SIGTRAP };
+    struct sigaction sa;
+    size_t i;
+    memset(&sa, 0, sizeof sa);
+    /* Header bug: the sa_sigaction macro expands to a member that does
+     * not exist, so address the union directly. */
+    sa.__sa_handler.__sa_sigaction = crash_handler;
+    sa.sa_flags = SA_SIGINFO;
+    sigemptyset(&sa.sa_mask);
+    for(i = 0; i < sizeof sigs / sizeof sigs[0]; i++)
+        sigaction(sigs[i], &sa, NULL);
 }
 
 /* Preflight: the payload must exist inside this package. A PKG built
@@ -247,10 +315,20 @@ static void step_status(void){
     ui_ok(out);
 }
 
+/* Clean exit: tear dialogs down, unload their modules, then _exit so the
+ * CRT teardown path never runs (returning from main is where the wizard
+ * has been dying: every crash landed at the end of a completed flow). */
+static void finish(int code){
+    ilogv(code == 0 ? "exit" : "fatal", code, 0);
+    ui_shutdown();
+    _exit(code);
+}
+
 int main(void){
     int q;
     char welcome[256];
-    if(ui_init() != 0) return 1;
+    crash_guard();
+    if(ui_init() != 0) finish(1);
     /* The system holds a splash screen over fresh apps: dialogs opened
      * under it get auto-dismissed (the half-second flash) or never
      * surface. Hide it once the UI layer is ready, then let the
@@ -265,17 +343,16 @@ int main(void){
         /* Declined install: offer status, then exit. Forward only. */
         if(ui_confirm("Show daemon status instead?") == 1)
             step_status();
-        return 0;
+        finish(0);
     }
-    if(step_assets() != 0) return 1;
+    if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
-    if(step_files() != 0) return 1;
+    if(step_files() != 0) finish(1);
     step_token();
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
           "The payload is in GoldHEN's bin/elf. To start it, open GoldHEN's\n"
           "payload menu and pick orbisrpc, or enable AutoRun for it once\n"
           "so it starts on every jailbreak.");
-    ilogv("exit", 0, 0);
-    return 0;
+    finish(0);
 }

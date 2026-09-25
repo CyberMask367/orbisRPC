@@ -65,14 +65,17 @@ int ui_ok(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
-    sceMsgDialogInitialize();
+    if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
     um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_OK;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
-    do { } while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED);
+    /* Yield while waiting: a hot spin starves the dialog service on the
+     * console (the proven pattern on this box sleeps 20 ms per tick). */
+    while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED)
+        sceKernelUsleep(20000);
     sceMsgDialogClose();
     sceMsgDialogGetResult(&res);
     sceMsgDialogTerminate();
@@ -84,7 +87,7 @@ int ui_confirm(const char *msg){
     OrbisMsgDialogUserMessageParam um;
     OrbisMsgDialogResult res;
     memset(&res, 0, sizeof res);
-    sceMsgDialogInitialize();
+    if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
@@ -93,7 +96,8 @@ int ui_confirm(const char *msg){
     um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
-    do { } while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED);
+    while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED)
+        sceKernelUsleep(20000);
     sceMsgDialogClose();
     sceMsgDialogGetResult(&res);
     sceMsgDialogTerminate();
@@ -110,7 +114,7 @@ int ui_progress_open(const char *msg){
          * leaves the flag set with no dialog behind it. Reclaim it. */
         ui_progress_close();
     }
-    sceMsgDialogInitialize();
+    if(sceMsgDialogInitialize() < 0) return -1;
     base_init(&param);
     param.mode = ORBIS_MSG_DIALOG_MODE_PROGRESS_BAR;
     memset(&bar, 0, sizeof bar);
@@ -197,4 +201,17 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
         out[i] = (wbuf[i] < 128 && wbuf[i] >= 32) ? (char)wbuf[i] : '?';
     out[i] = 0;
     return 1;
+}
+
+/* Teardown for exit: terminate any live dialog, then unload the dialog
+ * modules we loaded in ui_init (mirrors the known-good shutdown in
+ * rutracker-ps4). Called before _exit so no dialog outlives the app. */
+void ui_shutdown(void){
+    if(!ui_ready) return;
+    ui_ready = 0;
+    progress_open = 0;
+    sceMsgDialogTerminate();
+    sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_BACKEND);
+    sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
+    sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
 }
