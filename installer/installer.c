@@ -25,9 +25,11 @@
 #define SETUP_VERSION "1.0.0"
 #endif
 #define DAEMON_ELF "/app0/assets/daemon.elf"
+#define EVICT_ELF "/app0/assets/evict.elf"
 #define INST_DIR "/data/orbisRPC"
 #define INST_LOG "/data/orbisRPC/install.log"
 #define PAYLOAD_BIN "/data/GoldHEN/bin/elf/orbisrpc.bin"
+#define EVICT_BIN "/data/GoldHEN/bin/elf/evict.elf"
 
 /* Stage log: every copy step records errno + sizes to a file we can read
  * back over FTP. The dialog alone can't say WHICH stage failed. */
@@ -220,17 +222,42 @@ static int mkdirs(const char *path){
 static int step_files(void){
     char report[512];
     int ok = -1;
+    int evict_ok = -1;
     mkdir(INST_DIR, 0777);
     mkdirs("/data/GoldHEN/bin/elf");
+    /* Copy evict payload first — removes old orbisrpc instance. */
+    evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
+    ilog("evict-copy", evict_ok, 0, 0);
+    /* Copy daemon payload. */
     ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
+    ilog("daemon-copy", ok, 0, 0);
+    /* Pre-save config from PKG asset so step_token() skips on fresh install.
+     * Copy config.json from /app0/assets/config.json to /data/orbisRPC/config.json. */
+    {
+        FILE *src = fopen("/app0/assets/config.json", "rb");
+        if(src){
+            fclose(src);
+            copy_file("/app0/assets/config.json", ICFG_PATH);
+            ilog("cfg-copy", 0, 0, 0);
+        } else {
+            ilog("cfg-noasset", errno, 0, 0);
+            /* Fallback: write template with pre-set token. */
+            FILE *f = fopen(ICFG_PATH, "wb");
+            if(f){
+                fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
+                fclose(f);
+            }
+        }
+    }
     snprintf(report, sizeof report,
              "Daemon payload:\n%s : %s%s%s%s\n\n"
+             "Evict payload:\n%s : %s%s%s%s\n\n"
              "Start it from the payload launcher (/data/GoldHEN/bin/elf)\n"
              "and pick orbisrpc.",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
-             ok == 0 ? "" : " [stage ",
-             ok == 0 ? "" : g_stage,
-             ok == 0 ? "" : "]");
+             ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
+             EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
+             evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -300,6 +327,8 @@ static void step_status(void){
     used += (size_t)snprintf(out + used, sizeof out - used,
         "\ndaemon payload: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
+        "\nevict payload: %s", exists(EVICT_BIN) ? "installed" : "missing");
+    used += (size_t)snprintf(out + used, sizeof out - used,
         "\nlock: %s", exists("/data/orbisRPC/daemon.lock") ? "held (may be running)" : "free");
     used += (size_t)snprintf(out + used, sizeof out - used,
         "\nlog: %s", exists("/data/orbisRPC/log.txt") ? "present" : "none yet");
@@ -321,12 +350,15 @@ static void finish(int code){
 }
 
 int main(void){
+    /* Dismiss the PS4 splash immediately — first. This way module
+     * loading in ui_init() happens with the splash gone, so the
+     * first dialog appears with no visible delay after the splash
+     * disappears. Dialogs opened after this point won't be
+     * auto-dismissed by the splash. */
+    sceSystemServiceHideSplashScreen();
     char welcome[256];
     crash_guard();
     if(ui_init() != 0) finish(1);
-    /* Dismiss the PS4 splash so dialogs aren't auto-dismissed
-     * (the half-second flash) or never surface. No sleep needed. */
-    sceSystemServiceHideSplashScreen();
     snprintf(welcome, sizeof welcome,
              "orbisRPC Setup %s\n\nInstalls the daemon payload and saves your Discord token.",
              SETUP_VERSION);
