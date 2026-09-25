@@ -22,6 +22,10 @@ boot proof to go wrong.
 No branch ever returns to start. Cancel/skip always moves forward. The only
 exits are Done, explicit close, or a payload write failure.
 
+Buttons: X = enter, O = back. The confirm dialog uses `YESNO` focused on
+Yes — the OpenOrbis default `YESNO_FOCUS_NO` puts the console's confirm
+button on No, which inverts the whole wizard.
+
 ## Console facts encoded
 
 - Splash must hide before dialogs (`sceSystemServiceHideSplashScreen`) +

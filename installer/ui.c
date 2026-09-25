@@ -88,7 +88,9 @@ int ui_confirm(const char *msg){
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
-    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO_FOCUS_NO;
+    /* X = enter (Yes focused), O = back/decline. The default FOCUS_NO
+     * variant puts the confirm button on No, which inverts the wizard. */
+    um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
     do { } while(sceMsgDialogUpdateStatus() != ORBIS_COMMON_DIALOG_STATUS_FINISHED);
