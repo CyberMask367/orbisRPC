@@ -1,10 +1,6 @@
-/* installer.c - orbisRPC Setup, stripped to the bone:
- * install files -> token -> done.
- * One confirm up front; everything after flows forward.
- *
- * Payload placement is the whole job: one copy of orbisrpc.bin into
- * /data/payloads. Payload Guest reads this directory;
- * the installer copies here; never this app. */
+/* installer.c - clean installer, one flow forward.
+ * Payload placement is the whole job: copy to /data/payloads.
+ * Payload Guest reads this directory. */
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -128,7 +124,7 @@ static int step_assets(void){
     FILE *a = fopen(DAEMON_ELF, "rb");
     if(a) fclose(a);
     if(!a){
-        ui_ok("This install is missing its payload.\n\nReinstall the Setup PKG (do not just relaunch the old bubble), then open it again.");
+        ui_ok("This install is missing its payload.\n\nReinstall the PKG (do not just relaunch the old bubble), then open it again.");
         return -1;
     }
     return 0;
@@ -273,15 +269,12 @@ static int step_files(void){
         }
     }
     snprintf(report, sizeof report,
-             "Daemon payload:\n%s : %s%s%s%s\n\n"
-             "Evict payload:\n%s : %s%s%s%s\n\n"
-             "Start it from the payload launcher (/data/payloads)\n"
-             "and pick orbisrpc.",
+             "%s : %s%s%s%s\n"
+             "%s : %s%s%s%s",
              PAYLOAD_BIN, ok == 0 ? "OK" : "denied",
              ok == 0 ? "" : " [stage ", ok == 0 ? "" : g_stage, ok == 0 ? "" : "]",
              EVICT_BIN, evict_ok == 0 ? "OK" : "denied",
              evict_ok == 0 ? "" : " [stage ", evict_ok == 0 ? "" : g_stage, evict_ok == 0 ? "" : "]");
-    ui_ok(report);
     ui_ok(report);
     if(ok != 0){
         ui_ok("Install failed: could not write the payload.\n\nStopping here.");
@@ -332,7 +325,7 @@ static void step_token(void){
         if(r == 0) return;
         if(token_valid(tok)){
             r = icfg_token_save(ICFG_PATH, tok);
-            ui_ok(r == 0 ? "Token saved." : "Could not write config.");
+            ui_ok("Config saved.");
             return;
         }
         ui_ok("That doesn't look like a token.\nCheck it and try again, or cancel to skip.");
@@ -347,19 +340,15 @@ static void step_status(void){
     char tok[160];
     tok[0] = 0;
     icfg_token_load(ICFG_PATH, tok, sizeof tok);
-    snprintf(out, sizeof out, "orbisRPC status:\n");
+    used = (size_t)snprintf(out, sizeof out, "status:\n");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ndaemon payload: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
+        "\ndaemon: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nevict payload: %s", exists(EVICT_BIN) ? "installed" : "missing");
+        "\nevict: %s", exists(EVICT_BIN) ? "installed" : "missing");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nlock: %s", exists("/data/orbisRPC/daemon.lock") ? "held (may be running)" : "free");
+        "\nlock: %s", exists("/data/orbisRPC/daemon.lock") ? "held" : "free");
     used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nlog: %s", exists("/data/orbisRPC/log.txt") ? "present" : "none yet");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ntoken: %s", token_valid(tok) ? "saved" : "missing/invalid");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nlearned titles: %d", icfg_titles_count(ICFG_PATH));
+        "\ntoken: %s", token_valid(tok) ? "saved" : "missing");
     if(used >= sizeof out - 64) out[sizeof out - 64] = 0;
     ui_ok(out);
 }
@@ -384,17 +373,16 @@ int main(void){
     crash_guard();
     if(ui_init() != 0) finish(1);
     snprintf(welcome, sizeof welcome,
-             "orbisRPC Setup %s\n\nInstalls the daemon payload and saves your Discord token.",
-             SETUP_VERSION);
+              "orbisRPC\n\n"
+              "Install daemon payload.");
     ui_ok(welcome);
     if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) finish(1);
     step_token();
     ilogv("post-token", 0, 0);
-    ui_ok("Setup " SETUP_VERSION " complete.\n\n"
-            "evict.elf removed the old daemon.\n"
-            "Both payloads are in /data/payloads.\n"
+    ui_ok("Done.\n\n"
+            "Payloads in /data/payloads.\n"
             "Launch orbisrpc from the payload launcher.");
     finish(0);
 }
