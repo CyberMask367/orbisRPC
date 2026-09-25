@@ -221,32 +221,18 @@ static int step_files(void){
     mkdir(INST_DIR, 0777);
     mkdirs("/data/payloads");
     /* Evict any running orbisRPC daemon before copying new payload.
-     * Read PID from daemon.lock and send SIGTERM then SIGKILL. */
+     * kill() is blocked by the sandbox (EPERM), so use
+     * sceKernelLoadStartModule to launch evict.elf as a module.
+     * evict.elf reads daemon.lock, kills the daemon, exits. */
     {
-        FILE *lf = fopen("/data/orbisRPC/daemon.lock", "rb");
-        if(lf){
-            int pid = 0;
-            if(fscanf(lf, "%d", &pid) == 1 && pid > 0){
-                if(kill(pid, SIGTERM) == 0){
-                    ilog("evict-sigterm", 0, pid, 0);
-                    sceKernelUsleep(500000);
-                    if(kill(pid, SIGKILL) == 0){
-                        ilog("evict-sigkill", 0, pid, 0);
-                    } else {
-                        ilog("evict-sigkill-fail", errno, pid, 0);
-                    }
-                } else {
-                    ilog("evict-sigterm-fail", errno, pid, 0);
-                }
-            }
-            fclose(lf);
-        } else {
-            ilog("evict-nolock", errno, 0, 0);
+        evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
+        ilog("evict-copy", evict_ok, 0, 0);
+        if(evict_ok == 0){
+            uint32_t rv = sceKernelLoadStartModule(EVICT_BIN, 0, NULL, 0, NULL, NULL);
+            ilog("evict-launch", rv, 0, 0);
+            sceKernelUsleep(500000);
         }
     }
-    /* Copy evict payload to payload folder for future manual use. */
-    evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
-    ilog("evict-copy", evict_ok, 0, 0);
     /* Copy daemon payload. */
     ok = copy_file(DAEMON_ELF, PAYLOAD_BIN);
     ilog("daemon-copy", ok, 0, 0);
