@@ -67,7 +67,9 @@ $(INTDIR)/%.o: $(PROJDIR)/%.c
 $(INTDIR)/jsonlite.o: orbisrpc/jsonlite.c
 	$(CC) $(CFLAGS) -o $@ $<
 
-# Stage the daemon + evict payloads into the app image.
+# Stage the daemon + evict payloads + config into the app image.
+# config.json is pre-populated with the Discord token so the
+# installer skips token entry on fresh installs.
 installer/assets/daemon.elf: build-sdk/orbisrpc_sdk.elf
 	cp $< $@
 installer/assets/evict.elf: build-sdk/evict.elf
@@ -79,4 +81,4 @@ $(INTDIR)/%.o: $(PROJDIR)/%.cpp
 	$(CCX) $(CXXFLAGS) -o $@ $<
 
 clean:
-	rm -rf $(INTDIR) installer/eboot.bin installer/pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo installer/assets/daemon.elf installer/assets/evict.elf
+	rm -rf $(INTDIR) installer/eboot.bin installer/pkg.gp4 $(CONTENT_ID).pkg installer/sce_sys/param.sfo installer/assets/daemon.elf installer/assets/evict.elf installer/assets/config.json

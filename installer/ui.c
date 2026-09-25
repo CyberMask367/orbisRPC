@@ -33,8 +33,15 @@ static void base_init(OrbisMsgDialogParam *param){
 static int ui_ready = 0;
 static int ime_dialog_running = 0;
 
+/* Reap any stale dialog from a previous session that died
+ * mid-flow. Called by ui_init() to ensure a clean start. */
+static void reap_stale(void);
+
 int ui_init(void){
     if(ui_ready) return 0;
+    /* Reap any stale dialog from a previous session that died
+     * mid-flow. This ensures a clean start. */
+    reap_stale();
     {
         /* UserService first: dialogs + pad + IME all key off the user.
          * Best-effort (already-initialized is fine); uid fallbacks
@@ -71,8 +78,11 @@ int ui_init(void){
     return 0;
 }
 
-/* If a previous session died between open and terminate, a dialog
- * is still marked RUNNING and a fresh open() fails. Reap it first. */
+/* If a previous session died between open and close, a dialog
+ * can be left in RUNNING state, causing a fresh open() to fail.
+ * This function is called by ui_init() to reclaim any stale
+ * dialog before starting fresh. Currently unused (no stale
+ * dialogs observed after ui_init), kept for safety. */
 static void reap_stale(void){
     if(sceMsgDialogGetStatus() == ORBIS_COMMON_DIALOG_STATUS_RUNNING)
         sceMsgDialogTerminate();
@@ -103,6 +113,14 @@ int ui_ok(const char *msg){
     return 0;
 }
 
+/* Yes/No dialog. Returns 1 (Yes) or 0 (No/closed).
+ * The dialog uses YESNO_FOCUS_NO which focuses the "No" button.
+ * On this console, Circle=confirm and X=back. The confirm
+ * button selects the focused button, so X acts as confirm
+ * and selects No, while O acts as back and selects Yes.
+ * Since the dialog inverts the result, this returns 1 when
+ * X is pressed (Yes) and 0 when O is pressed (No) — matching
+ * the system's confirm button behavior. Kept for future use. */
 int ui_confirm(const char *msg){
     OrbisMsgDialogParam param;
     OrbisMsgDialogUserMessageParam um;
@@ -113,11 +131,10 @@ int ui_confirm(const char *msg){
     base_init(&param);
     memset(&um, 0, sizeof um);
     um.msg = msg;
-    /* Use the official OpenOrbis sample pattern (YESNO_FOCUS_NO).
-     * The dialog focuses the "No" button; the system's confirm
-     * button selects it (returns NO) and the cancel button returns
-     * YES — so on a Circle-accept console X acts as confirm and O
-     * as back, matching how every other app behaves here. */
+    /* YESNO_FOCUS_NO focuses the "No" button. On a Circle-accept
+     * console the confirm button selects the focused button, so
+     * X (confirm) selects No and O (back) selects Yes. The
+     * result is inverted: X→buttonId=NO→returns 1 (Yes). */
     um.buttonType = ORBIS_MSG_DIALOG_BUTTON_TYPE_YESNO_FOCUS_NO;
     param.userMsgParam = &um;
     if(sceMsgDialogOpen(&param) < 0){ sceMsgDialogTerminate(); return -1; }
@@ -244,13 +261,17 @@ int ui_input(const char *title, const char *placeholder, char *out, size_t cap){
 
 /* Teardown for exit: terminate any live dialog, then unload the
  * modules loaded in ui_init. Called before _exit so no dialog
- * outlives the app. */
+ * outlives the app. Must unload PAD too since it was loaded
+ * internally (ORBIS_SYSMODULE_INTERNAL_PAD). */
 void ui_shutdown(void){
     if(!ui_ready) return;
     ui_ready = 0;
     progress_open = 0;
+    ime_dialog_running = 0;
     sceMsgDialogTerminate();
+    sceImeDialogTerm();
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_BACKEND);
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_IME_DIALOG);
     sceSysmoduleUnloadModule(ORBIS_SYSMODULE_MESSAGE_DIALOG);
+    sceSysmoduleUnloadModule(ORBIS_SYSMODULE_INTERNAL_PAD);
 }

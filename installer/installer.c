@@ -277,9 +277,9 @@ static int step_files(void){
             if(!f){
                 f = fopen(ICFG_PATH, "wb");
                 if(f){
-            fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
-                fclose(f);
-            }
+                    fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
+                    fclose(f);
+                }
             } else {
                 fclose(f);
             }
@@ -288,10 +288,6 @@ static int step_files(void){
     ilogv("cfg-done", 0, 0);
     return 0;
 }
-
-/* 2: wifi check removed on purpose: it probed gateway.discord.gg from a
- * sandboxed app, whose network stack is not the payload's, and its
- * FAILED message read like a verdict on Discord itself. */
 
 /* 2: token. Skips silently when one already validates. */
 static void step_token(void){
@@ -318,30 +314,10 @@ static void step_token(void){
     }
 }
 
-/* Status: read-only health snapshot for debugging. Never mutates.
- * Existence only — stat() sizes/mtimes are unreliable under the sandbox. */
-static void step_status(void){
-    char out[640];
-    size_t used = 0;
-    char tok[160];
-    tok[0] = 0;
-    icfg_token_load(ICFG_PATH, tok, sizeof tok);
-    used = (size_t)snprintf(out, sizeof out, "status:\n");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ndaemon: %s", exists(PAYLOAD_BIN) ? "installed" : "missing");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nevict: %s", exists(EVICT_BIN) ? "installed" : "missing");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\nlock: %s", exists("/data/orbisRPC/daemon.lock") ? "held" : "free");
-    used += (size_t)snprintf(out + used, sizeof out - used,
-        "\ntoken: %s", token_valid(tok) ? "saved" : "missing");
-    if(used >= sizeof out - 64) out[sizeof out - 64] = 0;
-    ui_ok(out);
-}
-
-/* Clean exit: tear dialogs down, unload their modules, then _exit so the
- * CRT teardown path never runs (returning from main is where the wizard
- * has been dying: every crash landed at the end of a completed flow). */
+/* --- clean exit ---------------------------------------------------
+ * Tear dialogs down, unload modules, then _exit. Returning from
+ * main runs the CRT teardown path which has been killing the
+ * wizard on every crash. */
 static void finish(int code){
     ilogv(code == 0 ? "exit" : "fatal", code, 0);
     ui_shutdown();
@@ -349,19 +325,14 @@ static void finish(int code){
 }
 
 int main(void){
-    /* Dismiss the PS4 splash immediately — first. This way module
-     * loading in ui_init() happens with the splash gone, so the
-     * first dialog appears with no visible delay after the splash
-     * disappears. Dialogs opened after this point won't be
-     * auto-dismissed by the splash. */
+    /* Hide the PS4 splash first — dialogs opened while the splash
+     * is visible get auto-dismissed (half-second flash) or never
+     * surface. Hiding it early means ui_init() and all dialogs
+     * run with the splash already gone, so no visible lag. */
     sceSystemServiceHideSplashScreen();
-    char welcome[256];
     crash_guard();
     if(ui_init() != 0) finish(1);
-    snprintf(welcome, sizeof welcome,
-              "orbisRPC\n\n"
-              "Install daemon payload.");
-    ui_ok(welcome);
+    ui_ok("orbisRPC");
     if(step_assets() != 0) finish(1);
     ilogv("assets-ok", 0, 0);
     if(step_files() != 0) finish(1);
