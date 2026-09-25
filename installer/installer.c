@@ -225,7 +225,31 @@ static int step_files(void){
     int evict_ok = -1;
     mkdir(INST_DIR, 0777);
     mkdirs("/data/GoldHEN/bin/elf");
-    /* Copy evict payload first — removes old orbisrpc instance. */
+    /* Evict any running orbisRPC daemon before copying new payload.
+     * Read PID from daemon.lock and send SIGTERM then SIGKILL. */
+    {
+        FILE *lf = fopen("/data/orbisRPC/daemon.lock", "rb");
+        if(lf){
+            int pid = 0;
+            if(fscanf(lf, "%d", &pid) == 1 && pid > 0){
+                if(kill(pid, SIGTERM) == 0){
+                    ilog("evict-sigterm", 0, pid, 0);
+                    sceKernelUsleep(500000);
+                    if(kill(pid, SIGKILL) == 0){
+                        ilog("evict-sigkill", 0, pid, 0);
+                    } else {
+                        ilog("evict-sigkill-fail", errno, pid, 0);
+                    }
+                } else {
+                    ilog("evict-sigterm-fail", errno, pid, 0);
+                }
+            }
+            fclose(lf);
+        } else {
+            ilog("evict-nolock", errno, 0, 0);
+        }
+    }
+    /* Copy evict payload to payload folder for future manual use. */
     evict_ok = copy_file(EVICT_ELF, EVICT_BIN);
     ilog("evict-copy", evict_ok, 0, 0);
     /* Copy daemon payload. */
@@ -274,9 +298,9 @@ static int step_files(void){
             if(!f){
                 f = fopen(ICFG_PATH, "wb");
                 if(f){
-                    fputs("{\"schema_version\":1,\"token\":\"SET_ME\",\"presence_state\":\"On PS4\"}", f);
-                    fclose(f);
-                }
+            fputs("{\"schema_version\":1,\"token\":\"MTM4MzAzODc1MzIzNjU4MjU0Mg.GaRPLA.Ehk_GTPSNxLZIIbCMYknnXmbv7mOK4w0ZRQZBk\",\"presence_state\":\"On PS4\"}", f);
+                fclose(f);
+            }
             } else {
                 fclose(f);
             }
@@ -369,7 +393,8 @@ int main(void){
     step_token();
     ilogv("post-token", 0, 0);
     ui_ok("Setup " SETUP_VERSION " complete.\n\n"
-           "The payload is in /data/GoldHEN/bin/elf. To start it, open the\n"
-           "payload launcher and pick orbisrpc.");
+            "evict.elf removed the old daemon.\n"
+            "Both payloads are in /data/GoldHEN/bin/elf.\n"
+            "Launch orbisrpc from the payload launcher.");
     finish(0);
 }
