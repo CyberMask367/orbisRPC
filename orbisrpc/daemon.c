@@ -7,12 +7,7 @@
  * There is no OAuth flow anymore — OAuth2 access tokens are rejected by the
  * gateway (close 4004), which was why v1 never worked.
  *
- * A `stop` flag is polled so plugin_unload() can shut the loop down cleanly.
- *
- * KNOWN GAP: no suspend/resume notification handling. After Rest Mode the
- * sockets are dead; the heartbeat ack timeout plus reconnect loop should
- * recover, but suspend behavior is UNVERIFIED on hardware.
- */
+ * A `stop` flag is polled so plugin_unload() can shut the loop down cleanly. */
 #include "cfg.h"
 #include "clock.h"
 #include "lock.h"
@@ -181,7 +176,7 @@ int daemon_run(const char *fixed_game_name){
      * gets rolled back to .bak before anything runs it. */
     {
         static const char *targets[] = {
-            "/data/GoldHEN/payloads/orbisrpc.bin",
+            "/data/payloads/orbisrpc.bin",
             "/data/GoldHEN/plugins/orbisrpc_plugin.prx",
         };
         for(unsigned ti = 0; ti < sizeof targets/sizeof targets[0]; ti++){
@@ -448,7 +443,7 @@ int daemon_run(const char *fixed_game_name){
                 if(name[0]){
                     const char *cur_tid = detect_last_titleid();
                     if(!cur_tid) cur_tid = "";
-                    if(!strncmp(cur_tid, cand_title, sizeof cand_title)){
+                    if(!strcmp(cur_tid, cand_title)){
                         cand_hits++;
                     } else {
                         strncpy(cand_title, cur_tid, sizeof cand_title-1);
@@ -457,18 +452,18 @@ int daemon_run(const char *fixed_game_name){
                     }
                     miss_hits = 0;
                     if(fixed_game_name || cand_hits >= 2){
-                    if(!active || strncmp(cur_tid,sess_tid,sizeof sess_tid)!=0){
+                    if(!active || strcmp(cur_tid,sess_tid)!=0){
                         /* Switching away from a live session: bank its time.
                          * (Fresh starts and resumes have nothing to bank;
                          * the clear path already banked ended sessions.) */
                         if(active && sess_tid[0] &&
-                           strncmp(cur_tid,sess_tid,sizeof sess_tid)!=0)
+                           strcmp(cur_tid,sess_tid)!=0)
                             ledger_append(sess_tid, last, started, time_fixed());
                         active = 1;
                         strncpy(sess_tid, cur_tid, sizeof sess_tid-1);
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;
-                        if(!strncmp(cur_tid, prev_tid, sizeof prev_tid) &&
+                        if(!strcmp(cur_tid, prev_tid) &&
                            prev_started > 0 &&
                            now - prev_end < 600){
                             started = prev_started;
@@ -491,7 +486,7 @@ int daemon_run(const char *fixed_game_name){
                             else
                                 log_msg("config: learned %s", cur_tid);
                         }
-                    } else if(strncmp(name,last,sizeof last)!=0){
+                    } else if(strcmp(name,last)!=0){
                         strncpy(last, name, sizeof last-1);
                         last[sizeof last-1] = 0;
                         need_post = 1;

@@ -19,7 +19,6 @@
  * foreground) is reliable via ShellCoreUtil.
  */
 #include "detect.h"
-#include "appdb.h"
 #include "cfg.h"
 #include "log.h"
 #include "sfo.h"
@@ -538,7 +537,7 @@ int detect_current_game(char *out_name, size_t cap, char *out_path, size_t p_cap
         if(!named && cfg_title(&g_cfg, titleId, out_name, cap)==0){ named=1; log_msg("name: %s via config", out_name); }
         /* System app.db: the authoritative on-box title registry (SQLite,
          * read-only). Covers disc + digital where per-file sources miss. */
-        if(!named && appdb_title(titleId, out_name, cap)==0){ named=1; }
+        /* appdb_title(titleId, out_name, cap); */
         if(!named && pronunc_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appmeta", out_name); }
         if(!named){ if(sfo_file_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via sfo", out_name); } }
         if(!named){ if(appxml_title(titleId, out_name, cap)==0){ named=1; log_msg("name: %s via appxml", out_name); } }
@@ -574,7 +573,7 @@ int detect_name_for_title(const char *titleId, char *out_name, size_t cap){
     /* Game-process-safe only: small reads plus one bounded network
      * lookup; no multi-megabyte scans anywhere in this codebase. */
     if(cfg_title(&g_cfg, titleId, out_name, cap)==0){ log_msg("name: %s via config", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
-    if(appdb_title(titleId, out_name, cap)==0){ resolve_remember(titleId, out_name, "", 1); return 0; }
+    /* appdb_title(titleId, out_name, cap); */ resolve_remember(titleId, out_name, "", 1); return 0;
     if(pronunc_title(titleId, out_name, cap)==0){ log_msg("name: %s via appmeta", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }
     else log_msg("name: appmeta miss for %s", titleId);
     if(sfo_file_title(titleId, out_name, cap)==0){ log_msg("name: %s via sfo", out_name); resolve_remember(titleId, out_name, "", 1); return 0; }

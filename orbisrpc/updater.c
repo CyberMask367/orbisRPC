@@ -449,7 +449,7 @@ int updater_check_and_stage(void){
                 const jl_val_t *dl = jl_obj_get(a, "browser_download_url");
                 if(!nm || nm->type != JL_STRING || !dl || dl->type != JL_STRING) continue;
                 const char *target = NULL;
-                if(!strcmp(nm->str, "orbisrpc.bin")) target = "/data/GoldHEN/payloads/orbisrpc.bin";
+                if(!strcmp(nm->str, "orbisrpc.bin")) target = "/data/payloads/orbisrpc.bin";
                 else if(!strcmp(nm->str, "orbisrpc_plugin.prx")) target = "/data/GoldHEN/plugins/orbisrpc_plugin.prx";
                 else continue;
                 /* download URLs must be https (fail closed on http/other). */

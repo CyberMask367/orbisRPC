@@ -224,24 +224,17 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
         int fl = fcntl(fd, F_GETFL, 0);
         if(fl >= 0) fcntl(fd, F_SETFL, fl | O_NONBLOCK);
     }
-#else
-    return -1; /* OpenOrbis app builds keep the plain-HTTP path only. */
-#endif
     tls_ctx_t *t = tls_start(fd, TMDB_HOST);
     if(!t){
-#ifdef ORBISRPC_SDK_PAYLOAD
         close(fd);
-#else
-        sceNetSocketClose(fd);
-#endif
         return -1;
     }
     char req[512];
     int rl = snprintf(req, sizeof req,
         "GET %s HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n",
         path, TMDB_HOST);
-    if(rl <= 0 || rl >= (int)sizeof req){ tls_free(t); return -1; }
-    if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); return -1; }
+    if(rl <= 0 || rl >= (int)sizeof req){ tls_free(t); close(fd); return -1; }
+    if(tls_write(t, req, (size_t)rl) < 0){ tls_free(t); close(fd); return -1; }
     static char raw[TMDB_BODY_MAX];
     size_t bl = 0;
     int64_t dl = orbis_mono_s() + TMDB_HTTPS_DEADLINE_S + 10;
@@ -260,6 +253,7 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
         if(orbis_mono_s() > dl) break;
     }
     tls_free(t);
+    close(fd);
     if(bl == 0) return -1;
     int st = 0;
     size_t olen = 0;
@@ -271,6 +265,9 @@ static int https_get_tmdb(const char *path, char *out, size_t cap, int *out_stat
     out[olen] = 0;
     free(body);
     return (int)olen;
+#else
+    return -1; /* OpenOrbis app builds keep the plain-HTTP path only. */
+#endif
 }
 
 int tmdb_resolve(const char *titleId, char *name, size_t name_cap,
